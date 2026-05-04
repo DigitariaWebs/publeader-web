@@ -8,16 +8,25 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
-import { signIn } from "@/lib/auth";
+import { authClient } from "@/lib/auth-client";
 
 export function Login() {
   const router = useRouter();
   const [showPwd, setShowPwd] = useState(false);
-  const [email, setEmail] = useState("claire.lemoine@publeader.fr");
-  const [pwd, setPwd] = useState("••••••••");
+  const [email, setEmail] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const onLogin = () => {
-    signIn();
+  const onLogin = async () => {
+    setError(null);
+    setLoading(true);
+    const res = await authClient.signIn.email({ email, password: pwd });
+    setLoading(false);
+    if (res.error) {
+      setError(res.error.message ?? "Connexion échouée");
+      return;
+    }
     router.push("/");
   };
 
@@ -195,42 +204,21 @@ export function Login() {
             </a>
           </div>
 
+          {error && (
+            <div style={{ color: "#c0392b", fontSize: 13, marginBottom: 10 }}>
+              {error}
+            </div>
+          )}
           <button
             type="button"
             className="btn-glass-primary"
             style={{ width: "100%" }}
             onClick={onLogin}
+            disabled={loading}
           >
-            Se connecter
+            {loading ? "Connexion…" : "Se connecter"}
           </button>
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              margin: "24px 0",
-              fontSize: 11,
-              color: "var(--gray-500)",
-              letterSpacing: "0.06em",
-            }}
-          >
-            <div style={{ flex: 1, height: 1, background: "var(--gray-200)" }} />
-            OU ACCÈS RAPIDE
-            <div style={{ flex: 1, height: 1, background: "var(--gray-200)" }} />
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-            <button type="button" className="btn-glass-light compact" onClick={onLogin}>
-              Admin
-            </button>
-            <button type="button" className="btn-glass-light compact" onClick={onLogin}>
-              Entreprise
-            </button>
-            <button type="button" className="btn-glass-light compact" onClick={onLogin}>
-              Chauffeur
-            </button>
-          </div>
         </div>
       </div>
     </div>

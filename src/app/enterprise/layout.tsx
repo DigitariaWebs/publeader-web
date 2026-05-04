@@ -8,18 +8,22 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { EnterpriseShell } from "@/components/EnterpriseShell";
-import { isAuthed } from "@/lib/auth";
+import { authClient } from "@/lib/auth-client";
 
 export default function EnterpriseLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const { data: session, isPending } = authClient.useSession();
 
   useEffect(() => {
     setMounted(true);
-    if (!isAuthed()) {
+  }, []);
+
+  useEffect(() => {
+    if (!isPending && !session) {
       router.replace("/login");
     }
-  }, [router]);
+  }, [isPending, session, router]);
 
   if (!mounted) return null;
 

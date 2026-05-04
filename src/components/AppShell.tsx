@@ -17,7 +17,7 @@ import { NotificationsSheet } from "@/components/NotificationsSheet";
 import { Toaster } from "@/components/Toaster";
 import { useTheme } from "@/contexts/ThemeContext";
 import { breadcrumbForPath, titleForPath } from "@/lib/nav";
-import { isAuthed } from "@/lib/auth";
+import { authClient } from "@/lib/auth-client";
 
 interface AppShellProps {
   children: ReactNode;
@@ -40,13 +40,17 @@ export function AppShell({ children, pageTitle, campaignName }: AppShellProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
-  // Auth gate — replicates the prototype's `isAuthed()` check before render.
+  const { data: session, isPending } = authClient.useSession();
+
   useEffect(() => {
     setMounted(true);
-    if (!isAuthed()) {
+  }, []);
+
+  useEffect(() => {
+    if (!isPending && !session) {
       router.replace("/login");
     }
-  }, [router]);
+  }, [isPending, session, router]);
 
   // Avoid hydration mismatch: wait for ThemeContext's localStorage read.
   if (!mounted) {

@@ -1,39 +1,80 @@
-// Prototype auth — localStorage mirror of the original prototype's
-// `publeader_auth` key + a lightweight cookie so Next.js middleware can
-// enforce an auth gate server-side. Swap with a real session when the
-// backend is ready.
+import { betterAuth } from "better-auth";
+import { mongodbAdapter } from "better-auth/adapters/mongodb";
+import { admin, organization, emailOTP } from "better-auth/plugins";
+import { expo } from "@better-auth/expo";
+import { db, mongoClient } from "./db";
+import { sendMail } from "./mailer";
 
-export const AUTH_KEY = "publeader_auth";
-export const AUTH_COOKIE = "publeader_auth";
+export const auth = betterAuth({
+  database: mongodbAdapter(db, { client: mongoClient }),
+  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  secret: process.env.BETTER_AUTH_SECRET,
+  trustedOrigins: [
+    process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+    "driveads://",
+    "exp://",
+  ],
+  emailAndPassword: {
+    enabled: true,
+    requireEmailVerification: true,
+    minPasswordLength: 6,
+    maxPasswordLength: 128,
+  },
+  user: {
+    additionalFields: {
+      role: {
+        type: "string",
+        required: false,
+        defaultValue: "driver",
+        input: false,
+      },
+      status: {
+        type: "string",
+        required: false,
+        defaultValue: "pending",
+        input: false,
+      },
+      phone: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      driverId: { type: "string", required: false, input: false },
+      companyId: { type: "string", required: false, input: false },
+      partnerId: { type: "string", required: false, input: false },
+    },
+  },
+  session: {
+    expiresIn: 60 * 60 * 24 * 7,
+    updateAge: 60 * 60 * 24,
+  },
+  plugins: [
+    expo(),
+    admin({
+      defaultRole: "driver",
+      adminRoles: ["admin"],
+    }),
+    organization({
+      allowUserToCreateOrganization: false,
+    }),
+    emailOTP({
+      otpLength: 6,
+      expiresIn: 10 * 60,
+      sendVerificationOnSignUp: true,
+      async sendVerificationOTP({ email, otp, type }) {
+        const subjects: Record<string, string> = {
+          "sign-in": "Code de connexion DriveAds",
+          "email-verification": "Vérifiez votre email DriveAds",
+          "forget-password": "Réinitialisation mot de passe DriveAds",
+        };
+        await sendMail({
+          to: email,
+          subject: subjects[type] ?? "Code DriveAds",
+          text: `Votre code: ${otp}\n\nValide 10 minutes.`,
+        });
+      },
+    }),
+  ],
+});
 
-function setCookie(value: string, maxAgeSec: number) {
-  if (typeof document === "undefined") return;
-  document.cookie = `${AUTH_COOKIE}=${value}; Path=/; Max-Age=${maxAgeSec}; SameSite=Lax`;
-}
-
-export function isAuthed(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return localStorage.getItem(AUTH_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function signIn(): void {
-  try {
-    localStorage.setItem(AUTH_KEY, "1");
-  } catch {
-    /* ignore */
-  }
-  setCookie("1", 60 * 60 * 24 * 7); // 7 days
-}
-
-export function signOut(): void {
-  try {
-    localStorage.removeItem(AUTH_KEY);
-  } catch {
-    /* ignore */
-  }
-  setCookie("", 0);
-}
+export type Session = typeof auth.$Infer.Session;
