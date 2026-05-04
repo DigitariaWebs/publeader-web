@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "seed:admin": "tsx scripts/seed-admin.ts"
+    "seed:admin": "tsx scripts/seed-admin.ts",
+    "seed:users": "tsx scripts/seed-users.ts"
   },
   "dependencies": {
     "@better-auth/expo": "^1.6.9",
