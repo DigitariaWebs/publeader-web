@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Collections } from "@/lib/schemas";
 import { ObjectId } from "mongodb";
+import { computePeriodStats } from "@/lib/driver-stats";
 
 export async function GET(req: NextRequest) {
   const session = await auth.api.getSession({ headers: req.headers });
@@ -22,11 +23,22 @@ export async function GET(req: NextRequest) {
   let driver = null;
   let company = null;
   let partner = null;
+  let driverStats = null;
 
   if (user.driverId) {
     driver = await db
       .collection(Collections.drivers)
       .findOne({ _id: new ObjectId(user.driverId) });
+    if (driver) {
+      // Home screen needs monthlyEarnings + growthPercent in addition to
+      // lifetime totals. Compute the rolling 30d window once.
+      const month = await computePeriodStats(user.driverId, "month");
+      driverStats = {
+        monthlyEarnings: month.monthlyEarnings,
+        growthPercent: month.growthPercent,
+        activeCampaigns: month.activeCampaigns,
+      };
+    }
   }
   if (user.companyId) {
     company = await db
@@ -50,6 +62,7 @@ export async function GET(req: NextRequest) {
       emailVerified: user.emailVerified,
     },
     driver,
+    driverStats,
     company,
     partner,
   });

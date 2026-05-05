@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { Collections, type CampaignDoc, type CampaignStatus } from "./schemas";
 import { ObjectId } from "mongodb";
+import { recomputeLifetimeStats } from "./driver-stats";
 
 export function expectedStatus(
   campaign: Pick<CampaignDoc, "status" | "startDate" | "endDate">,
@@ -23,10 +24,13 @@ export function applyExpectedStatus<T extends CampaignDoc>(
 }
 
 // Fire-and-forget DB sync. Caller should not await.
+// When transitioning to 'completed', recomputes lifetime stats for every
+// assigned driver — keeps DriverDoc snapshots in sync with reality.
 export function syncStatusToDb(
   campaignId: ObjectId | string,
   fromStatus: CampaignStatus,
   toStatus: CampaignStatus,
+  assignedDriverIds: string[] = [],
 ): void {
   if (fromStatus === toStatus) return;
   const _id =
@@ -44,9 +48,24 @@ export function syncStatusToDb(
       at: new Date(),
       meta: { from: fromStatus, to: toStatus, source: "auto" },
     }),
-  ]).catch((err) => {
-    console.warn("[campaign-lifecycle] sync failed", err);
-  });
+  ])
+    .then(async () => {
+      if (toStatus === "completed" && assignedDriverIds.length > 0) {
+        await Promise.all(
+          assignedDriverIds.map((id) =>
+            recomputeLifetimeStats(id).catch((e) =>
+              console.warn(
+                `[campaign-lifecycle] recompute lifetime failed for driver ${id}`,
+                e,
+              ),
+            ),
+          ),
+        );
+      }
+    })
+    .catch((err) => {
+      console.warn("[campaign-lifecycle] sync failed", err);
+    });
 }
 
 export function reconcileMany<T extends CampaignDoc>(
@@ -56,7 +75,7 @@ export function reconcileMany<T extends CampaignDoc>(
   return campaigns.map((c) => {
     const next = expectedStatus(c, now);
     if (next !== c.status && c._id) {
-      syncStatusToDb(c._id, c.status, next);
+      syncStatusToDb(c._id, c.status, next, c.assignedDriverIds);
       return { ...c, status: next };
     }
     return c;

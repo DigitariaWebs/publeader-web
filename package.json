@@ -12,7 +12,8 @@
     "seed:users": "tsx --env-file=.env.local scripts/seed-users.ts",
     "seed:companies": "tsx --env-file=.env.local scripts/seed-companies.ts",
     "seed:campaigns": "tsx --env-file=.env.local scripts/seed-campaigns.ts",
-    "seed:all": "npm run seed:users && npm run seed:companies && npm run seed:campaigns"
+    "seed:all": "npm run seed:users && npm run seed:companies && npm run seed:campaigns",
+    "backfill:driver-stats": "tsx --env-file=.env.local scripts/backfill-driver-stats.ts"
   },
   "dependencies": {
     "@better-auth/expo": "^1.6.9",
