@@ -1,7 +1,6 @@
 import { auth } from "../src/lib/auth";
 import { db, mongoClient } from "../src/lib/db";
 import { Collections } from "../src/lib/schemas";
-import { ObjectId } from "mongodb";
 
 type DemoUser = {
   email: string;
@@ -92,42 +91,36 @@ const DEMO_USERS: DemoUser[] = [
   },
 ];
 
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
+async function wipeUser(email: string) {
+  const existing = await db.collection("user").findOne({ email });
+  if (!existing) return;
+  const userId = existing._id;
+  const userIdStr = userId.toString();
+
+  await db.collection("session").deleteMany({ userId: userIdStr });
+  await db.collection("account").deleteMany({ userId: userIdStr });
+  await db.collection(Collections.drivers).deleteMany({ userId: userIdStr });
+  await db.collection(Collections.companies).deleteMany({ userId: userIdStr });
+  await db.collection(Collections.partners).deleteMany({ userId: userIdStr });
+  await db.collection("user").deleteOne({ _id: userId });
+  console.log(`[seed] wiped existing ${email}`);
 }
 
-async function ensureUser(u: DemoUser) {
-  const existing = await db.collection("user").findOne({ email: u.email });
-  if (existing) {
-    console.log(`[seed] ${u.email} already exists, ensuring role/status…`);
-    await db.collection("user").updateOne(
-      { _id: existing._id },
-      {
-        $set: {
-          role: u.role,
-          status: "validated",
-          emailVerified: true,
-          phone: u.phone ?? existing.phone,
-        },
-      },
-    );
-    return existing._id.toString();
-  }
-
-  const result = await auth.api.signUpEmail({
+async function createUser(u: DemoUser): Promise<string> {
+  await auth.api.signUpEmail({
     body: { email: u.email, password: u.password, name: u.name },
     asResponse: false,
   });
-  const userId = result.user.id;
 
-  await db.collection("user").updateOne(
-    { _id: userId } as never,
+  // Re-fetch by email — Better Auth may store _id as ObjectId or string,
+  // looking up by email is the only safe path that always matches.
+  const created = await db.collection("user").findOne({ email: u.email });
+  if (!created) {
+    throw new Error(`signUpEmail succeeded but user ${u.email} not found in DB`);
+  }
+
+  const updateRes = await db.collection("user").updateOne(
+    { email: u.email },
     {
       $set: {
         role: u.role,
@@ -137,23 +130,16 @@ async function ensureUser(u: DemoUser) {
       },
     },
   );
-  return userId;
-}
 
-async function ensureDriver(userId: string, u: DemoUser) {
-  if (!u.driver) return;
-  const existing = await db
-    .collection(Collections.drivers)
-    .findOne({ userId });
-  if (existing) {
-    console.log(`[seed] driver doc exists for ${u.email}`);
-    await db.collection("user").updateOne(
-      { _id: userId } as never,
-      { $set: { driverId: existing._id.toString() } },
-    );
-    return;
+  if (updateRes.matchedCount === 0) {
+    throw new Error(`failed to set role/status for ${u.email}`);
   }
 
+  return created._id.toString();
+}
+
+async function createDriver(userId: string, u: DemoUser) {
+  if (!u.driver) return;
   const ins = await db.collection(Collections.drivers).insertOne({
     userId,
     firstName: u.driver.firstName,
@@ -172,27 +158,17 @@ async function ensureDriver(userId: string, u: DemoUser) {
     totalEarnings: 4320,
     documentsUploaded: true,
   });
-  await db.collection("user").updateOne(
-    { _id: userId } as never,
-    { $set: { driverId: ins.insertedId.toString() } },
-  );
+  await db
+    .collection("user")
+    .updateOne(
+      { email: u.email },
+      { $set: { driverId: ins.insertedId.toString() } },
+    );
   console.log(`[seed] driver linked: ${u.email}`);
 }
 
-async function ensureCompany(userId: string, u: DemoUser, headers: Headers) {
+async function createCompany(userId: string, u: DemoUser) {
   if (!u.company) return;
-  const existing = await db
-    .collection(Collections.companies)
-    .findOne({ userId });
-  if (existing) {
-    console.log(`[seed] company doc exists for ${u.email}`);
-    await db.collection("user").updateOne(
-      { _id: userId } as never,
-      { $set: { companyId: existing._id.toString() } },
-    );
-    return;
-  }
-
   const ins = await db.collection(Collections.companies).insertOne({
     userId,
     companyName: u.company.companyName,
@@ -208,46 +184,17 @@ async function ensureCompany(userId: string, u: DemoUser, headers: Headers) {
     campaignsCount: 0,
     createdAt: new Date(),
   });
-  const companyId = ins.insertedId.toString();
-
-  let organizationId: string | undefined;
-  try {
-    const orgSlug = `${slugify(u.company.companyName)}-${companyId.slice(-6)}`;
-    const org = await auth.api.createOrganization({
-      headers,
-      body: { name: u.company.companyName, slug: orgSlug, userId },
-    });
-    organizationId = (org as { id?: string } | null)?.id;
-    if (organizationId) {
-      await db
-        .collection(Collections.companies)
-        .updateOne({ _id: ins.insertedId }, { $set: { organizationId } });
-    }
-  } catch (e) {
-    console.warn(`[seed] organization create failed for ${u.email}`, e);
-  }
-
-  await db.collection("user").updateOne(
-    { _id: userId } as never,
-    { $set: { companyId } },
-  );
-  console.log(`[seed] company linked: ${u.email} (org=${organizationId ?? "n/a"})`);
+  await db
+    .collection("user")
+    .updateOne(
+      { email: u.email },
+      { $set: { companyId: ins.insertedId.toString() } },
+    );
+  console.log(`[seed] company linked: ${u.email}`);
 }
 
-async function ensurePartner(userId: string, u: DemoUser) {
+async function createPartner(userId: string, u: DemoUser) {
   if (!u.partner) return;
-  const existing = await db
-    .collection(Collections.partners)
-    .findOne({ userId });
-  if (existing) {
-    console.log(`[seed] partner doc exists for ${u.email}`);
-    await db.collection("user").updateOne(
-      { _id: userId } as never,
-      { $set: { partnerId: existing._id.toString() } },
-    );
-    return;
-  }
-
   const ins = await db.collection(Collections.partners).insertOne({
     userId,
     businessName: u.partner.businessName,
@@ -261,20 +208,50 @@ async function ensurePartner(userId: string, u: DemoUser) {
     status: "validated",
     createdAt: new Date(),
   });
-  await db.collection("user").updateOne(
-    { _id: userId } as never,
-    { $set: { partnerId: ins.insertedId.toString() } },
-  );
+  await db
+    .collection("user")
+    .updateOne(
+      { email: u.email },
+      { $set: { partnerId: ins.insertedId.toString() } },
+    );
   console.log(`[seed] partner linked: ${u.email}`);
 }
 
+async function verifyUser(u: DemoUser) {
+  const user = await db.collection("user").findOne({ email: u.email });
+  if (!user) throw new Error(`[verify] missing user: ${u.email}`);
+  if (user.role !== u.role) throw new Error(`[verify] ${u.email} role=${user.role}, expected ${u.role}`);
+  if (user.status !== "validated") throw new Error(`[verify] ${u.email} status=${user.status}, expected validated`);
+  if (user.emailVerified !== true) throw new Error(`[verify] ${u.email} emailVerified=${user.emailVerified}, expected true`);
+
+  const account = await db.collection("account").findOne({ userId: user._id.toString() });
+  const accountAlt = account ?? (await db.collection("account").findOne({ userId: user._id }));
+  if (!accountAlt) throw new Error(`[verify] ${u.email} has no account doc — login will fail`);
+
+  if (u.driver && !user.driverId) throw new Error(`[verify] ${u.email} missing driverId link`);
+  if (u.company && !user.companyId) throw new Error(`[verify] ${u.email} missing companyId link`);
+  if (u.partner && !user.partnerId) throw new Error(`[verify] ${u.email} missing partnerId link`);
+
+  console.log(`[verify] ✓ ${u.email}`);
+}
+
 async function main() {
-  const headers = new Headers();
+  console.log("\n=== wiping existing demo users ===");
   for (const u of DEMO_USERS) {
-    const userId = await ensureUser(u);
-    if (u.role === "driver") await ensureDriver(userId, u);
-    if (u.role === "advertiser") await ensureCompany(userId, u, headers);
-    if (u.role === "partner") await ensurePartner(userId, u);
+    await wipeUser(u.email);
+  }
+
+  console.log("\n=== creating demo users ===");
+  for (const u of DEMO_USERS) {
+    const userId = await createUser(u);
+    if (u.role === "driver") await createDriver(userId, u);
+    if (u.role === "advertiser") await createCompany(userId, u);
+    if (u.role === "partner") await createPartner(userId, u);
+  }
+
+  console.log("\n=== verifying ===");
+  for (const u of DEMO_USERS) {
+    await verifyUser(u);
   }
 
   console.log("\n✅ Seed done. Demo credentials:");
