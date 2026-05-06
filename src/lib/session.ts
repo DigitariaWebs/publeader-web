@@ -77,7 +77,9 @@ export async function requireAdvertiser(
 > {
   const s = await requireSession(headers);
   if (!s.ok) return s;
-  if (s.user.role !== "advertiser") {
+  // Both the founding advertiser and any invited team_member belong to a
+  // company; both should pass the advertiser-area guard.
+  if (s.user.role !== "advertiser" && s.user.role !== "team_member") {
     return {
       ok: false,
       response: NextResponse.json({ error: "forbidden" }, { status: 403 }),
