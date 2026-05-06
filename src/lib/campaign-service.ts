@@ -7,6 +7,7 @@ import {
   type CampaignDoc,
   type CampaignType,
   type CompanyDoc,
+  type DriverDoc,
 } from "./schemas";
 
 export type CampaignServiceErrorCode =
@@ -28,6 +29,14 @@ export type CampaignServiceErrorCode =
   | "already_published"
   | "draft_only"
   | "forbidden"
+  | "wrong_type"
+  | "driver_not_validated"
+  | "city_mismatch"
+  | "already_assigned"
+  | "campaign_full"
+  | "not_published"
+  | "driver_busy"
+  | "invalid_terminal"
   | "unknown";
 
 export class CampaignServiceError extends Error {
@@ -490,4 +499,304 @@ export async function deleteDraftCampaign(
   await db
     .collection(Collections.campaigns)
     .deleteOne({ _id: new ObjectId(campaignId), companyId, status: "draft" });
+}
+
+// --- Assignment (A5) -------------------------------------------------------
+
+export type EligibleDriverDTO = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  city: string;
+  rating: number;
+  campaignsDone: number;
+  totalKm: number;
+};
+
+export type AssignedDriverDTO = EligibleDriverDTO & {
+  phone: string;
+  email?: string;
+};
+
+function ensurePublished(campaign: CampaignDoc): void {
+  if (campaign.status !== "upcoming" && campaign.status !== "active") {
+    throw new CampaignServiceError(
+      "not_published",
+      `campaign status: ${campaign.status}`,
+    );
+  }
+}
+
+function ensureFlocage(campaign: CampaignDoc): void {
+  if (campaign.campaignType !== "flocage") {
+    throw new CampaignServiceError("wrong_type", "flocage required");
+  }
+}
+
+function ensureBorne(campaign: CampaignDoc): void {
+  if (campaign.campaignType !== "borne") {
+    throw new CampaignServiceError("wrong_type", "borne required");
+  }
+}
+
+/**
+ * Loads validated drivers in the campaign's city who are not already
+ * assigned to another active/upcoming campaign. Returns the drivers
+ * available for advertiser-driven assignment.
+ */
+export async function listEligibleDrivers(
+  companyId: string,
+  campaignId: string,
+): Promise<EligibleDriverDTO[]> {
+  const campaign = await loadCampaignDoc(companyId, campaignId);
+  ensureFlocage(campaign);
+
+  const drivers = (await db
+    .collection(Collections.drivers)
+    .find({ status: "validated", city: campaign.city })
+    .toArray()) as DriverDoc[];
+
+  if (drivers.length === 0) return [];
+
+  // Exclude drivers already assigned to this campaign or another live one.
+  const driverIds = drivers.map((d) => d._id!.toString());
+  const liveCampaigns = (await db
+    .collection(Collections.campaigns)
+    .find({
+      status: { $in: ["upcoming", "active"] },
+      assignedDriverIds: { $in: driverIds },
+    })
+    .project({ assignedDriverIds: 1 })
+    .toArray()) as { assignedDriverIds: string[] }[];
+
+  const busy = new Set<string>();
+  for (const c of liveCampaigns) {
+    for (const id of c.assignedDriverIds) busy.add(id);
+  }
+
+  return drivers
+    .filter((d) => {
+      const id = d._id!.toString();
+      return !busy.has(id);
+    })
+    .map((d) => ({
+      id: d._id!.toString(),
+      firstName: d.firstName,
+      lastName: d.lastName,
+      city: d.city,
+      rating: d.rating,
+      campaignsDone: d.campaignsDone,
+      totalKm: d.totalKm,
+    }));
+}
+
+/** Joins assignedDriverIds[] -> driver docs for the detail view. */
+export async function listAssignedDrivers(
+  companyId: string,
+  campaignId: string,
+): Promise<AssignedDriverDTO[]> {
+  const campaign = await loadCampaignDoc(companyId, campaignId);
+  if (campaign.assignedDriverIds.length === 0) return [];
+  const oids = campaign.assignedDriverIds
+    .filter((id) => ObjectId.isValid(id))
+    .map((id) => new ObjectId(id));
+  if (oids.length === 0) return [];
+  const drivers = (await db
+    .collection(Collections.drivers)
+    .find({ _id: { $in: oids } })
+    .toArray()) as DriverDoc[];
+  return drivers.map((d) => ({
+    id: d._id!.toString(),
+    firstName: d.firstName,
+    lastName: d.lastName,
+    city: d.city,
+    rating: d.rating,
+    campaignsDone: d.campaignsDone,
+    totalKm: d.totalKm,
+    phone: d.phone,
+  }));
+}
+
+export async function assignDriver(
+  companyId: string,
+  campaignId: string,
+  driverId: string,
+): Promise<CampaignDoc> {
+  if (!ObjectId.isValid(driverId)) {
+    throw new CampaignServiceError("not_found", "driver");
+  }
+  const campaign = await loadCampaignDoc(companyId, campaignId);
+  ensureFlocage(campaign);
+  ensurePublished(campaign);
+
+  const driver = (await db
+    .collection(Collections.drivers)
+    .findOne({ _id: new ObjectId(driverId) })) as DriverDoc | null;
+  if (!driver) throw new CampaignServiceError("not_found", "driver");
+  if (driver.status !== "validated") {
+    throw new CampaignServiceError("driver_not_validated");
+  }
+  if (driver.city !== campaign.city) {
+    throw new CampaignServiceError("city_mismatch");
+  }
+
+  // Block if driver is already busy on another live campaign.
+  const busy = await db
+    .collection(Collections.campaigns)
+    .findOne({
+      _id: { $ne: new ObjectId(campaignId) },
+      status: { $in: ["upcoming", "active"] },
+      assignedDriverIds: driverId,
+    });
+  if (busy) throw new CampaignServiceError("driver_busy");
+
+  // Atomic claim — same gate the driver-side accept uses.
+  const updated = (await db
+    .collection<CampaignDoc>(Collections.campaigns)
+    .findOneAndUpdate(
+      {
+        _id: new ObjectId(campaignId),
+        companyId,
+        status: { $in: ["upcoming", "active"] },
+        $expr: { $lt: ["$driversAssigned", "$driversNeeded"] },
+        assignedDriverIds: { $ne: driverId },
+      },
+      {
+        $inc: { driversAssigned: 1 },
+        $push: { assignedDriverIds: driverId },
+        $set: { updatedAt: new Date() },
+      },
+      { returnDocument: "after" },
+    )) as CampaignDoc | null;
+
+  if (!updated) {
+    const refetch = await loadCampaignDoc(companyId, campaignId);
+    if (refetch.assignedDriverIds.includes(driverId)) {
+      throw new CampaignServiceError("already_assigned");
+    }
+    if (refetch.driversAssigned >= refetch.driversNeeded) {
+      throw new CampaignServiceError("campaign_full");
+    }
+    throw new CampaignServiceError("unknown");
+  }
+
+  await db.collection(Collections.campaignEvents).insertOne({
+    campaignId,
+    type: "accept",
+    driverId,
+    at: new Date(),
+    meta: {
+      source: "advertiser",
+      capacityBefore: updated.driversAssigned - 1,
+      capacityAfter: updated.driversAssigned,
+      capacityTotal: updated.driversNeeded,
+    },
+  });
+  return updated;
+}
+
+export async function unassignDriver(
+  companyId: string,
+  campaignId: string,
+  driverId: string,
+): Promise<CampaignDoc> {
+  const campaign = await loadCampaignDoc(companyId, campaignId);
+  ensureFlocage(campaign);
+  if (!campaign.assignedDriverIds.includes(driverId)) {
+    throw new CampaignServiceError("not_found", "driver not assigned");
+  }
+  const updated = (await db
+    .collection<CampaignDoc>(Collections.campaigns)
+    .findOneAndUpdate(
+      {
+        _id: new ObjectId(campaignId),
+        companyId,
+        assignedDriverIds: driverId,
+      },
+      {
+        $inc: { driversAssigned: -1 },
+        $pull: { assignedDriverIds: driverId },
+        $set: { updatedAt: new Date() },
+      },
+      { returnDocument: "after" },
+    )) as CampaignDoc | null;
+
+  if (!updated) throw new CampaignServiceError("unknown");
+
+  await db.collection(Collections.campaignEvents).insertOne({
+    campaignId,
+    type: "cancel",
+    driverId,
+    at: new Date(),
+    meta: { source: "advertiser-unassign" },
+  });
+  return updated;
+}
+
+// --- Borne terminal assignment --------------------------------------------
+
+export async function assignTerminal(
+  companyId: string,
+  campaignId: string,
+  terminalId: string,
+): Promise<CampaignDoc> {
+  const trimmed = terminalId.trim();
+  if (!trimmed || trimmed.length > 80) {
+    throw new CampaignServiceError("invalid_terminal");
+  }
+  const campaign = await loadCampaignDoc(companyId, campaignId);
+  ensureBorne(campaign);
+  // Borne assignment allowed in draft, upcoming, active (not completed).
+  if (campaign.status === "completed") {
+    throw new CampaignServiceError("not_published");
+  }
+
+  const current = campaign.borne?.terminalIds ?? [];
+  if (current.includes(trimmed)) {
+    throw new CampaignServiceError("already_assigned");
+  }
+  if (current.length >= (campaign.borne?.count ?? 0)) {
+    throw new CampaignServiceError("campaign_full");
+  }
+  const updated = (await db
+    .collection<CampaignDoc>(Collections.campaigns)
+    .findOneAndUpdate(
+      {
+        _id: new ObjectId(campaignId),
+        companyId,
+        "borne.terminalIds": { $ne: trimmed },
+      },
+      {
+        $push: { "borne.terminalIds": trimmed },
+        $set: { updatedAt: new Date() },
+      },
+      { returnDocument: "after" },
+    )) as CampaignDoc | null;
+  if (!updated) throw new CampaignServiceError("unknown");
+  return updated;
+}
+
+export async function unassignTerminal(
+  companyId: string,
+  campaignId: string,
+  terminalId: string,
+): Promise<CampaignDoc> {
+  const trimmed = terminalId.trim();
+  const campaign = await loadCampaignDoc(companyId, campaignId);
+  ensureBorne(campaign);
+  if (!(campaign.borne?.terminalIds ?? []).includes(trimmed)) {
+    throw new CampaignServiceError("not_found");
+  }
+  const updated = (await db
+    .collection<CampaignDoc>(Collections.campaigns)
+    .findOneAndUpdate(
+      { _id: new ObjectId(campaignId), companyId },
+      {
+        $pull: { "borne.terminalIds": trimmed },
+        $set: { updatedAt: new Date() },
+      },
+      { returnDocument: "after" },
+    )) as CampaignDoc | null;
+  if (!updated) throw new CampaignServiceError("unknown");
+  return updated;
 }
