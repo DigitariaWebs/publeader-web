@@ -431,6 +431,91 @@ export const REQUIRED_DOC_TYPES: DocumentType[] = [
   "vehicle_photos",
 ];
 
+// --- Terminals (P2 — Bornes) ---
+
+export type TerminalStatus = "online" | "offline" | "maintenance";
+
+export type VenueType =
+  | "bar"
+  | "restaurant"
+  | "hotel"
+  | "nightclub"
+  | "gym"
+  | "other";
+
+export const VENUE_TYPES: VenueType[] = [
+  "bar",
+  "restaurant",
+  "hotel",
+  "nightclub",
+  "gym",
+  "other",
+];
+
+export type ScreenStatus = "active" | "idle" | "fault";
+
+export type TerminalDoc = {
+  _id?: ObjectId;
+  partnerId: string; // FK to PartnerDoc._id
+  code: string; // Human-readable id (e.g. "B-PR-019-03"). Unique.
+  name: string; // Venue display name (e.g. "Le Sélect")
+  venueType: VenueType;
+  address: string;
+  city: string;
+  coords: { lat: number; lng: number };
+  // Bcrypt hash of the device API key. Raw key shown once at creation.
+  apiKeyHash: string;
+  // Last heartbeat snapshot
+  lastHeartbeatAt?: Date;
+  // Persisted status. Reflects what was true at the last resolver run (read or
+  // heartbeat). Reads call resolveTerminalStatus() which may flip this.
+  lastKnownStatus: TerminalStatus;
+  spraysToday: number;
+  screenStatus: ScreenStatus;
+  // Lifecycle
+  installedAt: Date;
+  decommissionedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type TerminalEventType =
+  | "online"
+  | "offline"
+  | "maintenance_start"
+  | "maintenance_end";
+
+export type TerminalEventDoc = {
+  _id?: ObjectId;
+  terminalId: string;
+  type: TerminalEventType;
+  at: Date;
+  meta?: Record<string, unknown>;
+};
+
+export type MaintenanceWindowStatus =
+  | "scheduled"
+  | "active"
+  | "done"
+  | "cancelled";
+
+export type MaintenanceWindowDoc = {
+  _id?: ObjectId;
+  terminalId: string;
+  startsAt: Date;
+  endsAt: Date;
+  reason: string;
+  status: MaintenanceWindowStatus;
+  createdBy: string; // admin userId
+  createdAt: Date;
+};
+
+// Heartbeat older than this threshold flips the terminal to "offline".
+export const TERMINAL_OFFLINE_THRESHOLD_MS = 5 * 60 * 1000;
+
+// Per-terminal API key length (raw bytes -> hex).
+export const TERMINAL_API_KEY_BYTES = 32;
+
 export const Collections = {
   drivers: "drivers",
   companies: "companies",
@@ -443,4 +528,7 @@ export const Collections = {
   documents: "documents",
   vehicles: "vehicles",
   assets: "assets",
+  terminals: "terminals",
+  terminalEvents: "terminal_events",
+  maintenanceWindows: "maintenance_windows",
 } as const;

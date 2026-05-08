@@ -9,7 +9,7 @@ import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { MiniBars } from "@/components/charts";
 import { useToast } from "@/contexts/ToastContext";
-import { BORNES, type Borne } from "@/lib/data";
+import { BORNES as MOCK_BORNES, type Borne } from "@/lib/data";
 
 interface BorneDetailSheetProps {
   borne: Borne;
@@ -220,7 +220,8 @@ function BorneDetailSheet({ borne, onClose }: BorneDetailSheetProps) {
   );
 }
 
-export function BornesPro() {
+export function BornesPro({ bornes }: { bornes?: Borne[] } = {}) {
+  const BORNES = bornes ?? MOCK_BORNES;
   const [detail, setDetail] = useState<Borne | null>(null);
   const [hover, setHover] = useState<Borne | null>(null);
 

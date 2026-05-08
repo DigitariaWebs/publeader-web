@@ -1,11 +1,5 @@
-import { PartenaireStub } from "@/screens/partner/PartenaireStub";
+import { PartenaireBornes } from "@/screens/partner/PartenaireBornes";
 
 export default function PartenaireBornesPage() {
-  return (
-    <PartenaireStub
-      title="Bornes"
-      subtitle="Gestion des bornes (P2)."
-      icon="package"
-    />
-  );
+  return <PartenaireBornes />;
 }

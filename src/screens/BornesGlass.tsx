@@ -7,10 +7,11 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
-import { BORNES, type Borne } from "@/lib/data";
+import { BORNES as MOCK_BORNES, type Borne } from "@/lib/data";
 import { MiniBars } from "@/components/charts";
 
-export function BornesGlass() {
+export function BornesGlass({ bornes }: { bornes?: Borne[] } = {}) {
+  const BORNES = bornes ?? MOCK_BORNES;
   const [detail, setDetail] = useState<Borne | null>(null);
 
   return (

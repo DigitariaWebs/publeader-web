@@ -751,6 +751,20 @@ export async function assignTerminal(
     throw new CampaignServiceError("not_published");
   }
 
+  // Validate terminalId references a real, live terminal.
+  let terminalOid: ObjectId;
+  try {
+    terminalOid = new ObjectId(trimmed);
+  } catch {
+    throw new CampaignServiceError("invalid_terminal");
+  }
+  const terminal = await db
+    .collection(Collections.terminals)
+    .findOne({ _id: terminalOid });
+  if (!terminal || terminal.decommissionedAt) {
+    throw new CampaignServiceError("invalid_terminal");
+  }
+
   const current = campaign.borne?.terminalIds ?? [];
   if (current.includes(trimmed)) {
     throw new CampaignServiceError("already_assigned");
