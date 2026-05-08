@@ -55,6 +55,8 @@ export default function DevLoginPage() {
     }
     if (role === "advertiser") {
       router.push("/enterprise");
+    } else if (role === "partner") {
+      router.push("/partenaire");
     } else {
       router.push("/");
     }

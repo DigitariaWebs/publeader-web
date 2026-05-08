@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "./auth";
 import { db } from "./db";
-import { Collections, type CompanyDoc, type DriverDoc } from "./schemas";
+import {
+  Collections,
+  type CompanyDoc,
+  type DriverDoc,
+  type PartnerDoc,
+} from "./schemas";
 import { ObjectId } from "mongodb";
 
 export type SessionUser = {
@@ -107,6 +112,44 @@ export async function requireAdvertiser(
     };
   }
   return { ok: true, user: s.user, company };
+}
+
+export async function requirePartner(
+  headers: Headers,
+): Promise<
+  | { ok: true; user: SessionUser; partner: PartnerDoc }
+  | { ok: false; response: NextResponse }
+> {
+  const s = await requireSession(headers);
+  if (!s.ok) return s;
+  if (s.user.role !== "partner") {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "forbidden" }, { status: 403 }),
+    };
+  }
+  if (!s.user.partnerId) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "partner profile missing" },
+        { status: 409 },
+      ),
+    };
+  }
+  const partner = (await db
+    .collection(Collections.partners)
+    .findOne({ _id: new ObjectId(s.user.partnerId) })) as PartnerDoc | null;
+  if (!partner) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "partner not found" },
+        { status: 404 },
+      ),
+    };
+  }
+  return { ok: true, user: s.user, partner };
 }
 
 export async function requireAdmin(
