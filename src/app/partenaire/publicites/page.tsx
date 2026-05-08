@@ -1,11 +1,5 @@
-import { PartenaireStub } from "@/screens/partner/PartenaireStub";
+import { PartenairePublicites } from "@/screens/partner/PartenairePublicites";
 
 export default function PartenairePublicitesPage() {
-  return (
-    <PartenaireStub
-      title="Publicités"
-      subtitle="Programmation et signalements (P4)."
-      icon="megaphone"
-    />
-  );
+  return <PartenairePublicites />;
 }

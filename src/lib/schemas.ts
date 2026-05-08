@@ -591,6 +591,84 @@ export type RefillLogDoc = {
   notes?: string;
 };
 
+// --- Ads (P4) ---
+
+export type AdScheduleStatus =
+  | "live"
+  | "scheduled"
+  | "paused"
+  | "expired"
+  | "cancelled";
+
+export type AdScheduleDoc = {
+  _id?: ObjectId;
+  terminalId: string;
+  campaignId: string;
+  // Cached for fast filtering on partner + advertiser views.
+  partnerId: string;
+  companyId: string;
+  // Time window: hours 0..23. End < start means overnight (e.g. 20→4).
+  startHour: number;
+  endHour: number;
+  // Plays once every N seconds within the window. 60 = once a minute.
+  intervalSeconds: number;
+  status: AdScheduleStatus;
+  pausedAt?: Date;
+  pausedBy?: string;
+  pauseReason?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+// Default schedule applied when admin assigns a borne terminal to a campaign.
+export const AD_SCHEDULE_DEFAULT_START_HOUR = 18;
+export const AD_SCHEDULE_DEFAULT_END_HOUR = 4;
+export const AD_SCHEDULE_DEFAULT_INTERVAL_SECONDS = 60;
+export const AD_SCHEDULE_INTERVAL_MIN = 10;
+export const AD_SCHEDULE_INTERVAL_MAX = 3600;
+
+export type AdImpressionDailyDoc = {
+  _id?: ObjectId;
+  terminalId: string;
+  campaignId: string;
+  date: string; // "YYYY-MM-DD" (UTC)
+  impressions: number;
+  updatedAt: Date;
+};
+
+export type AdIssueKind =
+  | "not_playing"
+  | "wrong_content"
+  | "audio_issue"
+  | "screen_issue"
+  | "other";
+
+export const AD_ISSUE_KINDS: AdIssueKind[] = [
+  "not_playing",
+  "wrong_content",
+  "audio_issue",
+  "screen_issue",
+  "other",
+];
+
+export type AdIssueStatus = "open" | "resolved" | "dismissed";
+
+export type AdIssueReportDoc = {
+  _id?: ObjectId;
+  partnerId: string;
+  terminalId: string;
+  scheduleId: string;
+  campaignId: string;
+  kind: AdIssueKind;
+  description: string;
+  status: AdIssueStatus;
+  createdAt: Date;
+  createdBy: string; // partner userId
+  resolvedAt?: Date;
+  resolvedBy?: string; // admin userId
+  resolution?: string;
+};
+
 export const Collections = {
   drivers: "drivers",
   companies: "companies",
@@ -609,4 +687,7 @@ export const Collections = {
   scents: "scents",
   stockOrders: "stock_orders",
   refillLogs: "refill_logs",
+  adSchedules: "ad_schedules",
+  adImpressionsDaily: "ad_impressions_daily",
+  adIssueReports: "ad_issue_reports",
 } as const;

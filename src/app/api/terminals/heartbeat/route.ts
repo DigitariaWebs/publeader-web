@@ -9,6 +9,7 @@ import {
   type TerminalDoc,
 } from "@/lib/schemas";
 import { resolveTerminalStatus } from "@/lib/terminal-service";
+import { applyImpressionDeltas } from "@/lib/ad-schedule-service";
 
 type CartridgeUpdate = {
   slot: number;
@@ -19,11 +20,17 @@ type CartridgeUpdate = {
   levelPercent?: number;
 };
 
+type ImpressionDelta = {
+  campaignId: string;
+  delta: number;
+};
+
 type HeartbeatBody = {
   terminalCode?: string;
   spraysToday?: number;
   screenStatus?: ScreenStatus;
   cartridges?: CartridgeUpdate[];
+  impressions?: ImpressionDelta[];
 };
 
 const VALID_SCREEN_STATUS: ScreenStatus[] = ["active", "idle", "fault"];
@@ -110,6 +117,17 @@ export async function POST(req: NextRequest) {
   await db
     .collection(Collections.terminals)
     .updateOne({ _id: terminal._id }, { $set: update });
+
+  // Apply per-campaign impression deltas (P4). No-op if absent or empty.
+  if (Array.isArray(body.impressions) && body.impressions.length) {
+    await applyImpressionDeltas(
+      terminal._id!.toString(),
+      body.impressions.filter(
+        (i) => typeof i.campaignId === "string" && typeof i.delta === "number",
+      ),
+      now,
+    );
+  }
 
   // Re-fetch and resolve to emit transition events.
   const fresh = (await db

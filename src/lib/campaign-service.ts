@@ -8,7 +8,12 @@ import {
   type CampaignType,
   type CompanyDoc,
   type DriverDoc,
+  type TerminalDoc,
 } from "./schemas";
+import {
+  cancelScheduleForUnassignment,
+  ensureScheduleForAssignment,
+} from "./ad-schedule-service";
 
 export type CampaignServiceErrorCode =
   | "invalid_title"
@@ -787,6 +792,14 @@ export async function assignTerminal(
       { returnDocument: "after" },
     )) as CampaignDoc | null;
   if (!updated) throw new CampaignServiceError("unknown");
+
+  // Side-effect: create / reactivate the ad schedule for this pairing so
+  // partner ad screens reflect the assignment immediately.
+  try {
+    await ensureScheduleForAssignment(terminal as TerminalDoc, updated);
+  } catch (e) {
+    console.warn("[assignTerminal] ensureSchedule failed", e);
+  }
   return updated;
 }
 
@@ -812,5 +825,13 @@ export async function unassignTerminal(
       { returnDocument: "after" },
     )) as CampaignDoc | null;
   if (!updated) throw new CampaignServiceError("unknown");
+
+  // Side-effect: cancel the matching ad schedule so it stops showing on
+  // partner views. Existing impression history is preserved.
+  try {
+    await cancelScheduleForUnassignment(trimmed, campaignId);
+  } catch (e) {
+    console.warn("[unassignTerminal] cancelSchedule failed", e);
+  }
   return updated;
 }
