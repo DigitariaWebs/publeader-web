@@ -904,6 +904,63 @@ export type ExpenseDoc = {
   updatedAt: Date;
 };
 
+// --- AD4 Reports ---
+
+export type ReportType =
+  | "monthly_summary"
+  | "accounting_export"
+  | "borne_performance"
+  | "driver_activity"
+  | "advertiser_engagement"
+  | "gdpr_audit";
+
+export const REPORT_TYPES: ReportType[] = [
+  "monthly_summary",
+  "accounting_export",
+  "borne_performance",
+  "driver_activity",
+  "advertiser_engagement",
+  "gdpr_audit",
+];
+
+export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  monthly_summary: "Bilan mensuel",
+  accounting_export: "Export comptable",
+  borne_performance: "Performance Leader Borne",
+  driver_activity: "Activité chauffeurs",
+  advertiser_engagement: "Rapport annonceurs",
+  gdpr_audit: "Audit RGPD",
+};
+
+export type ReportFormat = "pdf" | "csv" | "zip";
+
+// Output format is fixed per report type so the UI knows what extension to
+// expect and can render the right "PDF / CSV" badge.
+export const REPORT_TYPE_FORMATS: Record<ReportType, ReportFormat> = {
+  monthly_summary: "pdf",
+  accounting_export: "zip",
+  borne_performance: "pdf",
+  driver_activity: "pdf",
+  advertiser_engagement: "pdf",
+  gdpr_audit: "pdf",
+};
+
+export type ReportDoc = {
+  _id?: ObjectId;
+  type: ReportType;
+  periodStart: Date;
+  periodEnd: Date;
+  format: ReportFormat;
+  filename: string;
+  // Cloudinary references. resourceType is "raw" for both PDF and ZIP since
+  // Cloudinary's image/video pipelines don't accept these MIME types.
+  cloudinaryUrl: string;
+  cloudinaryPublicId: string;
+  byteSize: number;
+  requestedBy: string; // admin user id
+  requestedAt: Date;
+};
+
 export const Collections = {
   drivers: "drivers",
   companies: "companies",
@@ -931,4 +988,5 @@ export const Collections = {
   invoices: "invoices",
   expenses: "expenses",
   stripeEvents: "stripe_events",
+  reports: "reports",
 } as const;
