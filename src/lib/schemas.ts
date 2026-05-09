@@ -1,6 +1,58 @@
 import { ObjectId } from "mongodb";
 
 export type ValidationStatus = "pending" | "validated" | "rejected";
+
+// --- AD1 Validations queue ---
+
+export type ValidationKind = "driver" | "company" | "partner";
+
+export const VALIDATION_KINDS: ValidationKind[] = [
+  "driver",
+  "company",
+  "partner",
+];
+
+export type ValidationRejectReason =
+  | "incomplete_documents"
+  | "non_compliant_vehicle"
+  | "fraud_suspicion"
+  | "invalid_legal_info"
+  | "other";
+
+export const VALIDATION_REJECT_REASONS: ValidationRejectReason[] = [
+  "incomplete_documents",
+  "non_compliant_vehicle",
+  "fraud_suspicion",
+  "invalid_legal_info",
+  "other",
+];
+
+export const VALIDATION_REJECT_REASON_LABELS: Record<
+  ValidationRejectReason,
+  string
+> = {
+  incomplete_documents: "Documents incomplets",
+  non_compliant_vehicle: "Véhicule non conforme",
+  fraud_suspicion: "Suspicion de fraude",
+  invalid_legal_info: "Informations légales invalides",
+  other: "Autre",
+};
+
+// Per-entity review meta. Last action wins (no append-only log).
+export type ValidationReviewMeta = {
+  reviewedBy?: string; // admin user id
+  reviewedAt?: Date;
+  rejection?: {
+    reason: ValidationRejectReason;
+    note?: string;
+  };
+  lastInfoRequest?: {
+    message: string;
+    requestedBy: string;
+    requestedAt: Date;
+  };
+};
+
 export type UserRoleName =
   | "admin"
   | "advertiser"
@@ -36,6 +88,8 @@ export type DriverDoc = {
   documentsApproved: boolean;
   // Last time the driver changed their city (used to enforce a cooldown).
   cityChangedAt?: Date;
+  // AD1 — per-entity admin review trail (last action only).
+  validation?: ValidationReviewMeta;
 };
 
 export const CITY_CHANGE_COOLDOWN_HOURS = 48;
@@ -104,6 +158,8 @@ export type CompanyDoc = {
   vatNumber?: string;
   legalForm?: "SARL" | "SAS" | "SA" | "EURL" | "Auto-entrepreneur" | "Autre";
   createdAt: Date;
+  // AD1 — admin review trail.
+  validation?: ValidationReviewMeta;
 };
 
 export const COMPANY_LEGAL_FORMS = [
@@ -133,6 +189,8 @@ export type PartnerDoc = {
   monthlyTargetCents?: number;
   status: ValidationStatus;
   createdAt: Date;
+  // AD1 — admin review trail.
+  validation?: ValidationReviewMeta;
 };
 
 export type CampaignStatus =
