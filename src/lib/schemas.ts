@@ -809,6 +809,82 @@ export type PartnerPayoutDoc = {
 // Day of the month (1..28) when scheduled payouts should be processed.
 export const PARTNER_PAYOUT_SCHEDULE_DAY = 5;
 
+// --- AD2 Finances ---
+
+export type InvoiceStatus = "brouillon" | "envoyee" | "payee" | "en_retard";
+
+// `en_retard` is computed on read when status === "envoyee" and dueDate is past.
+// Stored statuses are: brouillon | envoyee | payee.
+export type InvoiceStoredStatus = "brouillon" | "envoyee" | "payee";
+
+export type InvoiceLine = {
+  label: string;
+  qty: number;
+  unitCents: number;
+  totalCents: number;
+};
+
+export type InvoiceDoc = {
+  _id?: ObjectId;
+  ref: string; // Auto-assigned at create time, e.g. "F-2026-0412". Unique.
+  companyId: string;
+  campaignId?: string;
+  issueDate: Date;
+  dueDate: Date;
+  lines: InvoiceLine[];
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  status: InvoiceStoredStatus;
+  sentAt?: Date;
+  sentTo?: string; // email
+  paidAt?: Date;
+  paidVia?: string;
+  paidReference?: string;
+  notes?: string;
+  createdBy: string; // admin userId
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+// Default payment terms when none provided.
+export const INVOICE_DUE_DAYS_DEFAULT = 30;
+// Default French VAT applied if caller does not pass an explicit taxCents.
+export const INVOICE_VAT_RATE = 0.2;
+
+export type ExpenseCategory =
+  | "fourniture"
+  | "sous_traitance"
+  | "infrastructure"
+  | "logistique";
+
+export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  "fourniture",
+  "sous_traitance",
+  "infrastructure",
+  "logistique",
+];
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  fourniture: "Fourniture",
+  sous_traitance: "Sous-traitance",
+  infrastructure: "Infrastructure",
+  logistique: "Logistique",
+};
+
+export type ExpenseDoc = {
+  _id?: ObjectId;
+  label: string;
+  category: ExpenseCategory;
+  amountCents: number; // positive
+  vendor?: string;
+  expenseDate: Date;
+  notes?: string;
+  createdBy: string; // admin userId
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export const Collections = {
   drivers: "drivers",
   companies: "companies",
@@ -833,4 +909,6 @@ export const Collections = {
   revenueDaily: "revenue_daily",
   revenueMonthly: "revenue_monthly",
   partnerPayouts: "partner_payouts",
+  invoices: "invoices",
+  expenses: "expenses",
 } as const;

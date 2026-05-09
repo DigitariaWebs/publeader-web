@@ -20,15 +20,31 @@ function getTransporter() {
   return transporter;
 }
 
+export type MailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
+
 export async function sendMail(opts: {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  attachments?: MailAttachment[];
 }) {
   const t = getTransporter();
   if (!t) {
-    console.log("[mailer:dev]", opts.to, opts.subject, "\n", opts.text);
+    console.log(
+      "[mailer:dev]",
+      opts.to,
+      opts.subject,
+      opts.attachments?.length
+        ? `(+${opts.attachments.length} attachment${opts.attachments.length === 1 ? "" : "s"})`
+        : "",
+      "\n",
+      opts.text,
+    );
     return;
   }
   await t.sendMail({
@@ -37,5 +53,6 @@ export async function sendMail(opts: {
     subject: opts.subject,
     text: opts.text,
     html: opts.html,
+    attachments: opts.attachments,
   });
 }

@@ -1,168 +1,210 @@
 "use client";
 
-/**
- * FinancesGlass — rond/vitré finances dashboard.
- * Interactive: period selector, invoice status filter, product breakdown toggle.
- */
-
-import { useMemo, useState } from "react";
-import { Icon, type IconName } from "@/components/Icon";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Icon } from "@/components/Icon";
 import { StackedArea } from "@/components/charts";
+import type { ExpenseDTO, InvoiceDTO } from "@/lib/finance-serializer";
+import type { CommissionRow } from "@/lib/commission-service";
+import type { FinanceKpiDTO } from "@/lib/finance-kpi-service";
+import { EXPENSE_CATEGORY_LABELS } from "@/lib/schemas";
 
-type Period = "7j" | "30j" | "90j" | "annee";
-type InvoiceStatus = "all" | "paid" | "pending" | "late";
-type Breakdown = "product" | "city";
+type StatusFilter = "all" | "paid" | "pending" | "late";
 
-interface Invoice {
-  id: string;
-  num: string;
-  client: string;
-  clientInitials: string;
-  clientColor: string;
-  date: string;
-  amount: number;
-  status: "paid" | "pending" | "late";
+const fmtEur = (cents: number) =>
+  (cents / 100).toLocaleString("fr-FR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }) + " €";
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+
+const STATUS_LABEL: Record<InvoiceDTO["status"], string> = {
+  brouillon: "Brouillon",
+  envoyee: "En cours",
+  payee: "Payée",
+  en_retard: "En retard",
+};
+
+const COLORS = [
+  "#FDD835",
+  "#8D6E63",
+  "#9C27B0",
+  "#43A047",
+  "#E53935",
+  "#795548",
+  "#0EA5E9",
+  "#EC407A",
+];
+
+function colorFor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return COLORS[Math.abs(hash) % COLORS.length];
 }
 
-interface TopClient {
-  name: string;
-  initials: string;
-  color: string;
-  rev: number;
-  share: number;
-  trend: number; // percent change vs previous period
+function initialsFor(name: string): string {
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-interface UpcomingPayment {
-  when: string;
-  who: string;
-  amount: number;
-  icon: IconName;
-  tone: "info" | "success" | "warning";
+function matchesStatus(s: InvoiceDTO["status"], f: StatusFilter): boolean {
+  if (f === "all") return true;
+  if (f === "paid") return s === "payee";
+  if (f === "pending") return s === "envoyee";
+  return s === "en_retard";
 }
-
-interface Commission {
-  name: string;
-  initials: string;
-  rides: number;
-  amount: number;
-}
-
-const PERIODS: { k: Period; l: string }[] = [
-  { k: "7j", l: "7 jours" },
-  { k: "30j", l: "30 jours" },
-  { k: "90j", l: "90 jours" },
-  { k: "annee", l: "Année" },
-];
-
-const INVOICES: Invoice[] = [
-  { id: "i1", num: "F-2026-0420", client: "Renault France", clientInitials: "R", clientColor: "#FDD835", date: "20 avr.", amount: 3200, status: "pending" },
-  { id: "i2", num: "F-2026-0418", client: "Le Clos des Vignes", clientInitials: "CV", clientColor: "#8D6E63", date: "18 avr.", amount: 1820, status: "paid" },
-  { id: "i3", num: "F-2026-0415", client: "Maison Lavande", clientInitials: "ML", clientColor: "#9C27B0", date: "15 avr.", amount: 1250, status: "paid" },
-  { id: "i4", num: "F-2026-0412", client: "SoBio Market SAS", clientInitials: "SB", clientColor: "#43A047", date: "12 avr.", amount: 2000, status: "paid" },
-  { id: "i5", num: "F-2026-0410", client: "Kalis Gym", clientInitials: "KG", clientColor: "#E53935", date: "10 avr.", amount: 940, status: "pending" },
-  { id: "i6", num: "F-2026-0405", client: "Fédération Artisans", clientInitials: "AB", clientColor: "#795548", date: "05 avr.", amount: 5800, status: "paid" },
-  { id: "i7", num: "F-2026-0328", client: "Nova Cosmétique", clientInitials: "N", clientColor: "#EC407A", date: "28 mars", amount: 1420, status: "late" },
-  { id: "i8", num: "F-2026-0322", client: "Atelier Véloce", clientInitials: "AV", clientColor: "#0EA5E9", date: "22 mars", amount: 680, status: "late" },
-];
-
-const TOP_CLIENTS: TopClient[] = [
-  { name: "Fédération Artisans", initials: "AB", color: "#795548", rev: 5800, share: 25, trend: 18 },
-  { name: "Renault France", initials: "R", color: "#FDD835", rev: 3200, share: 14, trend: 12 },
-  { name: "SoBio Market SAS", initials: "SB", color: "#43A047", rev: 2000, share: 9, trend: -4 },
-  { name: "Le Clos des Vignes", initials: "CV", color: "#8D6E63", rev: 1820, share: 8, trend: 22 },
-  { name: "Nova Cosmétique", initials: "N", color: "#EC407A", rev: 1420, share: 6, trend: 6 },
-];
-
-const UPCOMING: UpcomingPayment[] = [
-  { when: "22 avr.", who: "Renault France", amount: 3200, icon: "banknote", tone: "info" },
-  { when: "24 avr.", who: "Kalis Gym", amount: 940, icon: "clock", tone: "warning" },
-  { when: "28 avr.", who: "Maison Lavande (prorata)", amount: 310, icon: "credit-card", tone: "info" },
-  { when: "30 avr.", who: "Clôture mensuelle", amount: 28600, icon: "check-circle", tone: "success" },
-];
-
-const COMMISSIONS: Commission[] = [
-  { name: "Lucas Fontaine", initials: "LF", rides: 42, amount: 510 },
-  { name: "Amélie Rousseau", initials: "AR", rides: 36, amount: 420 },
-  { name: "Nadia El-Amrani", initials: "NE", rides: 48, amount: 540 },
-  { name: "Thomas Girard", initials: "TG", rides: 28, amount: 310 },
-  { name: "Inès Moreau", initials: "IM", rides: 22, amount: 240 },
-];
-
-const PRODUCT_SPLIT = [
-  { label: "Flocage véhicule", value: 18420, color: "#233466", share: 72 },
-  { label: "Leader Borne", value: 7240, color: "#3B82F6", share: 28 },
-];
-
-const CITY_SPLIT = [
-  { label: "Lyon", value: 9200, color: "#233466", share: 36 },
-  { label: "Paris", value: 7100, color: "#3B82F6", share: 28 },
-  { label: "Bordeaux", value: 3800, color: "#9C27B0", share: 15 },
-  { label: "Marseille", value: 2800, color: "#F59E0B", share: 11 },
-  { label: "Autres", value: 2700, color: "#10B981", share: 10 },
-];
 
 export function FinancesGlass() {
-  const [period, setPeriod] = useState<Period>("30j");
-  const [status, setStatus] = useState<InvoiceStatus>("all");
-  const [breakdown, setBreakdown] = useState<Breakdown>("product");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [kpis, setKpis] = useState<FinanceKpiDTO | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceDTO[]>([]);
+  const [commissions, setCommissions] = useState<CommissionRow[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseDTO[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredInvoices = useMemo(
-    () => (status === "all" ? INVOICES : INVOICES.filter((i) => i.status === status)),
-    [status],
-  );
-
-  const totals = useMemo(() => {
-    const paid = INVOICES.filter((i) => i.status === "paid").reduce((a, b) => a + b.amount, 0);
-    const pending = INVOICES.filter((i) => i.status === "pending").reduce((a, b) => a + b.amount, 0);
-    const late = INVOICES.filter((i) => i.status === "late").reduce((a, b) => a + b.amount, 0);
-    return { paid, pending, late, all: paid + pending + late };
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const [k, i, c, e] = await Promise.all([
+      fetch("/api/admin/finance-kpis", { credentials: "include" }).then((r) =>
+        r.json(),
+      ),
+      fetch("/api/admin/invoices", { credentials: "include" }).then((r) =>
+        r.json(),
+      ),
+      fetch("/api/admin/commissions", { credentials: "include" }).then((r) =>
+        r.json(),
+      ),
+      fetch("/api/admin/expenses", { credentials: "include" }).then((r) =>
+        r.json(),
+      ),
+    ]);
+    setKpis(k.kpis ?? null);
+    setInvoices(i.invoices ?? []);
+    setCommissions(c.commissions ?? []);
+    setExpenses(e.expenses ?? []);
+    setLoading(false);
   }, []);
 
-  // Period-based KPI adjustments for a sense of interactivity
-  const periodFactor: Record<Period, number> = { "7j": 0.24, "30j": 1, "90j": 2.8, annee: 11.2 };
-  const f = periodFactor[period];
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
-  const fmtEur = (n: number) =>
-    n.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " €";
+  const filteredInvoices = useMemo(
+    () => invoices.filter((i) => matchesStatus(i.status, statusFilter)),
+    [invoices, statusFilter],
+  );
 
-  const segments = breakdown === "product" ? PRODUCT_SPLIT : CITY_SPLIT;
+  const counts = useMemo(() => {
+    const all = invoices.length;
+    const paid = invoices.filter((i) => i.status === "payee").length;
+    const pending = invoices.filter((i) => i.status === "envoyee").length;
+    const late = invoices.filter((i) => i.status === "en_retard").length;
+    return { all, paid, pending, late };
+  }, [invoices]);
+
+  const totals = useMemo(() => {
+    const paid = invoices
+      .filter((i) => i.status === "payee")
+      .reduce((a, b) => a + b.totalCents, 0);
+    const pending = invoices
+      .filter((i) => i.status === "envoyee")
+      .reduce((a, b) => a + b.totalCents, 0);
+    const late = invoices
+      .filter((i) => i.status === "en_retard")
+      .reduce((a, b) => a + b.totalCents, 0);
+    return { paid, pending, late, all: paid + pending + late };
+  }, [invoices]);
+
+  const topClients = useMemo(() => {
+    const map = new Map<string, { name: string; rev: number }>();
+    for (const inv of invoices) {
+      if (inv.status !== "payee") continue;
+      const name = inv.companyName ?? inv.companyId;
+      const cur = map.get(name) ?? { name, rev: 0 };
+      cur.rev += inv.totalCents;
+      map.set(name, cur);
+    }
+    const total = Array.from(map.values()).reduce((a, b) => a + b.rev, 0) || 1;
+    return Array.from(map.values())
+      .sort((a, b) => b.rev - a.rev)
+      .slice(0, 5)
+      .map((c) => ({
+        ...c,
+        share: Math.round((c.rev / total) * 100),
+      }));
+  }, [invoices]);
+
+  const overdueInvoices = useMemo(
+    () =>
+      invoices
+        .filter((i) => i.status === "envoyee" || i.status === "en_retard")
+        .sort(
+          (a, b) =>
+            new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(),
+        )
+        .slice(0, 5),
+    [invoices],
+  );
+
+  const topCommissions = useMemo(
+    () =>
+      [...commissions]
+        .filter((c) => c.status === "pending")
+        .sort((a, b) => b.amountCents - a.amountCents)
+        .slice(0, 5),
+    [commissions],
+  );
+
+  const expensesMonth = useMemo(() => {
+    if (!kpis) return 0;
+    return kpis.expensesMonthCents;
+  }, [kpis]);
+
+  if (loading) {
+    return (
+      <div className="glass-page">
+        <div style={{ padding: 32, color: "var(--gray-500)" }}>Chargement…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-page">
       <div className="glass-pagehead">
         <div>
-          <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, margin: 0 }}>Finances</h1>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, margin: 0 }}>
+            Finances
+          </h1>
           <p style={{ margin: "4px 0 0", color: "var(--gray-500)", fontSize: 13 }}>
             Revenus, encaissements, commissions — vue consolidée.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <div className="glass-segmented">
-            {PERIODS.map((p) => (
-              <button
-                key={p.k}
-                type="button"
-                className={period === p.k ? "active" : ""}
-                onClick={() => setPeriod(p.k)}
-              >
-                {p.l}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="glass-btn">
-            <Icon name="download" size={14} /> Exporter
-          </button>
-        </div>
       </div>
 
-      {/* KPI row */}
       <div className="glass-kpigrid" style={{ marginBottom: 20 }}>
         {[
-          { l: "MRR", v: fmtEur(Math.round(28600 * f)), s: "+12 % vs période préc.", up: true },
-          { l: "Encaissé", v: fmtEur(Math.round(19820 * f)), s: `${INVOICES.filter((i) => i.status === "paid").length} factures payées`, up: true },
-          { l: "En attente", v: fmtEur(Math.round(6140 * f)), s: `${INVOICES.filter((i) => i.status === "pending").length} factures en cours`, up: false },
-          { l: "Commissions", v: fmtEur(Math.round(1880 * f)), s: "8 % des revenus", up: true },
+          { l: "MRR", v: fmtEur(kpis?.mrrCents ?? 0), s: "Encaissé ce mois", up: true },
+          {
+            l: "Encaissé",
+            v: fmtEur(kpis?.collectedCents ?? 0),
+            s: `${kpis?.collectedCount ?? 0} factures payées`,
+            up: true,
+          },
+          {
+            l: "En attente",
+            v: fmtEur(kpis?.pendingCents ?? 0),
+            s: `${kpis?.pendingCount ?? 0} factures · ${kpis?.overdueCount ?? 0} en retard`,
+            up: false,
+          },
+          {
+            l: "Commissions",
+            v: fmtEur(kpis?.commissionsDueCents ?? 0),
+            s: `${kpis?.commissionsDueCount ?? 0} chauffeurs en attente`,
+            up: true,
+          },
         ].map((k) => (
           <div key={k.l} className="glass-kpi">
             <div className="label">{k.l}</div>
@@ -177,61 +219,51 @@ export function FinancesGlass() {
         ))}
       </div>
 
-      {/* Chart + Top clients */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 20, marginBottom: 20 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.5fr 1fr",
+          gap: 20,
+          marginBottom: 20,
+        }}
+      >
         <div className="glass-panel" style={{ padding: 20 }}>
           <div className="glass-panelhead" style={{ padding: 0, marginBottom: 8 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: 14 }}>Revenus — {PERIODS.find((p) => p.k === period)?.l.toLowerCase()}</h3>
-              <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--gray-500)" }}>
+              <h3 style={{ margin: 0, fontSize: 14 }}>Revenus — 30 jours</h3>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 12,
+                  color: "var(--gray-500)",
+                }}
+              >
                 Flocage + Borne cumulés
               </p>
-            </div>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 3,
-                    background: "var(--navy)",
-                  }}
-                />
-                Flocage
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 3,
-                    background: "#3B82F6",
-                  }}
-                />
-                Borne
-              </div>
             </div>
           </div>
           <StackedArea />
           <div className="glass-stat-grid">
             <div className="glass-stat">
-              <div className="stat-label">Revenu net</div>
-              <div className="stat-val">
-                {fmtEur(Math.round(25660 * f))}
+              <div className="stat-label">Encaissé (mois)</div>
+              <div className="stat-val">{fmtEur(totals.paid)}</div>
+              <div className="stat-sub">
+                <span className="up">{counts.paid} factures</span>
               </div>
-              <div className="stat-sub"><span className="up">+14 %</span></div>
             </div>
             <div className="glass-stat">
-              <div className="stat-label">Panier moyen</div>
-              <div className="stat-val">
-                {fmtEur(Math.round(1820))}
+              <div className="stat-label">En attente</div>
+              <div className="stat-val">{fmtEur(totals.pending + totals.late)}</div>
+              <div className="stat-sub">
+                <span>{counts.pending + counts.late} factures</span>
               </div>
-              <div className="stat-sub"><span className="up">+3 %</span></div>
             </div>
             <div className="glass-stat">
-              <div className="stat-label">Marge brute</div>
-              <div className="stat-val">62 <span className="currency">%</span></div>
-              <div className="stat-sub"><span className="up">+1,4 pt</span></div>
+              <div className="stat-label">Dépenses (mois)</div>
+              <div className="stat-val">{fmtEur(expensesMonth)}</div>
+              <div className="stat-sub">
+                <span>{kpis?.expensesMonthCount ?? 0} entrées</span>
+              </div>
             </div>
           </div>
         </div>
@@ -241,92 +273,122 @@ export function FinancesGlass() {
             <h3 style={{ margin: 0, fontSize: 14 }}>Top clients</h3>
             <span style={{ fontSize: 12, color: "var(--gray-500)" }}>Part du CA</span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {TOP_CLIENTS.map((t) => (
-              <div key={t.name}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 6,
-                  }}
-                >
-                  <div
-                    className="brand-logo"
-                    style={{ background: t.color, width: 30, height: 30, fontSize: 11 }}
-                  >
-                    {t.initials}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+          {topClients.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--gray-500)" }}>
+              Aucune facture payée pour l’instant.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {topClients.map((t) => {
+                const color = colorFor(t.name);
+                return (
+                  <div key={t.name}>
                     <div
                       style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        marginBottom: 6,
                       }}
                     >
-                      {t.name}
+                      <div
+                        className="brand-logo"
+                        style={{
+                          background: color,
+                          width: 30,
+                          height: 30,
+                          fontSize: 11,
+                        }}
+                      >
+                        {initialsFor(t.name)}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {t.name}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>
+                        {fmtEur(t.rev)}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        paddingLeft: 40,
+                      }}
+                    >
+                      <div className="glass-progress" style={{ flex: 1, height: 6 }}>
+                        <span style={{ width: t.share + "%" }} />
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--gray-500)",
+                          fontWeight: 600,
+                          minWidth: 36,
+                          textAlign: "right",
+                        }}
+                      >
+                        {t.share} %
+                      </span>
                     </div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fmtEur(t.rev)}</div>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    paddingLeft: 40,
-                  }}
-                >
-                  <div className="glass-progress" style={{ flex: 1, height: 6 }}>
-                    <span style={{ width: t.share + "%" }} />
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: t.trend >= 0 ? "var(--success)" : "var(--danger)",
-                      fontWeight: 600,
-                      minWidth: 36,
-                      textAlign: "right",
-                    }}
-                  >
-                    {t.trend >= 0 ? "+" : ""}{t.trend} %
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Invoices + Upcoming */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 20, marginBottom: 20 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.6fr 1fr",
+          gap: 20,
+          marginBottom: 20,
+        }}
+      >
         <div className="glass-panel" style={{ padding: 20 }}>
           <div className="glass-panelhead" style={{ padding: 0, marginBottom: 14 }}>
             <div>
               <h3 style={{ margin: 0, fontSize: 14 }}>Factures récentes</h3>
-              <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--gray-500)" }}>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 12,
+                  color: "var(--gray-500)",
+                }}
+              >
                 {filteredInvoices.length} factures ·{" "}
-                {fmtEur(filteredInvoices.reduce((a, b) => a + b.amount, 0))}
+                {fmtEur(
+                  filteredInvoices.reduce((a, b) => a + b.totalCents, 0),
+                )}
               </p>
             </div>
             <div className="glass-segmented">
               {(
                 [
-                  ["all", `Toutes · ${INVOICES.length}`],
-                  ["paid", `Payées · ${INVOICES.filter((i) => i.status === "paid").length}`],
-                  ["pending", `En cours · ${INVOICES.filter((i) => i.status === "pending").length}`],
-                  ["late", `En retard · ${INVOICES.filter((i) => i.status === "late").length}`],
+                  ["all", `Toutes · ${counts.all}`],
+                  ["paid", `Payées · ${counts.paid}`],
+                  ["pending", `En cours · ${counts.pending}`],
+                  ["late", `En retard · ${counts.late}`],
                 ] as const
               ).map(([k, l]) => (
                 <button
                   key={k}
                   type="button"
-                  className={status === k ? "active" : ""}
-                  onClick={() => setStatus(k)}
+                  className={statusFilter === k ? "active" : ""}
+                  onClick={() => setStatusFilter(k)}
                 >
                   {l}
                 </button>
@@ -334,79 +396,103 @@ export function FinancesGlass() {
             </div>
           </div>
 
-          <table className="glass-table">
-            <thead>
-              <tr>
-                <th>Facture</th>
-                <th>Client</th>
-                <th>Date</th>
-                <th>Statut</th>
-                <th style={{ textAlign: "right" }}>Montant</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInvoices.map((inv) => (
-                <tr key={inv.id} style={{ cursor: "pointer" }}>
-                  <td>
-                    <span style={{ fontWeight: 600, fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>
-                      {inv.num}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div
-                        className="brand-logo"
-                        style={{ background: inv.clientColor, width: 26, height: 26, fontSize: 10 }}
-                      >
-                        {inv.clientInitials}
-                      </div>
-                      <span>{inv.client}</span>
-                    </div>
-                  </td>
-                  <td style={{ color: "var(--gray-500)" }}>{inv.date}</td>
-                  <td>
-                    <span
-                      className={
-                        "g-chip " +
-                        (inv.status === "paid"
-                          ? "success"
-                          : inv.status === "pending"
-                            ? "info"
-                            : "danger")
-                      }
-                    >
-                      <span className="dot" />
-                      {inv.status === "paid"
-                        ? "Payée"
-                        : inv.status === "pending"
-                          ? "En cours"
-                          : "En retard"}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmtEur(inv.amount)}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <div style={{ display: "inline-flex", gap: 4 }}>
-                      <button
-                        type="button"
-                        className="glass-btn ghost compact"
-                        title="Voir"
-                      >
-                        <Icon name="eye" size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        className="glass-btn ghost compact"
-                        title="Télécharger"
-                      >
-                        <Icon name="download" size={13} />
-                      </button>
-                    </div>
-                  </td>
+          {filteredInvoices.length === 0 ? (
+            <div
+              style={{
+                padding: 32,
+                color: "var(--gray-500)",
+                fontSize: 13,
+                textAlign: "center",
+              }}
+            >
+              Aucune facture dans cette catégorie.
+            </div>
+          ) : (
+            <table className="glass-table">
+              <thead>
+                <tr>
+                  <th>Facture</th>
+                  <th>Client</th>
+                  <th>Date</th>
+                  <th>Statut</th>
+                  <th style={{ textAlign: "right" }}>Montant</th>
+                  <th style={{ textAlign: "right" }}>PDF</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredInvoices.map((inv) => {
+                  const name = inv.companyName ?? inv.companyId;
+                  return (
+                    <tr key={inv.id}>
+                      <td>
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            fontFamily: "var(--font-mono, monospace)",
+                            fontSize: 12,
+                          }}
+                        >
+                          {inv.ref}
+                        </span>
+                      </td>
+                      <td>
+                        <div
+                          style={{ display: "flex", alignItems: "center", gap: 10 }}
+                        >
+                          <div
+                            className="brand-logo"
+                            style={{
+                              background: colorFor(name),
+                              width: 26,
+                              height: 26,
+                              fontSize: 10,
+                            }}
+                          >
+                            {initialsFor(name)}
+                          </div>
+                          <span>{name}</span>
+                        </div>
+                      </td>
+                      <td style={{ color: "var(--gray-500)" }}>
+                        {fmtDate(inv.issueDate)}
+                      </td>
+                      <td>
+                        <span
+                          className={
+                            "g-chip " +
+                            (inv.status === "payee"
+                              ? "success"
+                              : inv.status === "envoyee"
+                                ? "info"
+                                : inv.status === "en_retard"
+                                  ? "danger"
+                                  : "")
+                          }
+                        >
+                          <span className="dot" />
+                          {STATUS_LABEL[inv.status]}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>
+                        {fmtEur(inv.totalCents)}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <a
+                          className="glass-btn ghost compact"
+                          href={`/api/admin/invoices/${inv.id}/pdf`}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Télécharger"
+                        >
+                          <Icon name="download" size={13} />
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
           <div
             style={{
@@ -419,9 +505,18 @@ export function FinancesGlass() {
               color: "var(--gray-500)",
             }}
           >
-            <span>Total {status === "all" ? "toutes factures" : status === "paid" ? "payées" : status === "pending" ? "en cours" : "en retard"}</span>
+            <span>
+              Total{" "}
+              {statusFilter === "all"
+                ? "toutes factures"
+                : statusFilter === "paid"
+                  ? "payées"
+                  : statusFilter === "pending"
+                    ? "en cours"
+                    : "en retard"}
+            </span>
             <strong style={{ color: "var(--black)" }}>
-              {fmtEur(filteredInvoices.reduce((a, b) => a + b.amount, 0))}
+              {fmtEur(filteredInvoices.reduce((a, b) => a + b.totalCents, 0))}
             </strong>
           </div>
         </div>
@@ -430,210 +525,182 @@ export function FinancesGlass() {
           <div className="glass-panelhead" style={{ padding: 0, marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 14 }}>Échéances à venir</h3>
             <span className="g-chip outline">
-              <Icon name="calendar" size={11} /> 10 prochains jours
+              <Icon name="calendar" size={11} /> {overdueInvoices.length} factures
             </span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {UPCOMING.map((u, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px 14px",
-                  background: "var(--navy-soft)",
-                  borderRadius: 14,
-                }}
-              >
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 12,
-                    background: "rgba(255,255,255,0.85)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color:
-                      u.tone === "success"
-                        ? "var(--success)"
-                        : u.tone === "warning"
-                          ? "var(--warning)"
-                          : "var(--navy)",
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon name={u.icon} size={16} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{u.who}</div>
-                  <div style={{ fontSize: 11, color: "var(--gray-500)", marginTop: 2 }}>
-                    {u.when}
+          {overdueInvoices.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--gray-500)" }}>
+              Aucune échéance ouverte.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {overdueInvoices.map((u) => {
+                const isLate = u.status === "en_retard";
+                return (
+                  <div
+                    key={u.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      background: "var(--navy-soft)",
+                      borderRadius: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 12,
+                        background: "rgba(255,255,255,0.85)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: isLate ? "var(--danger)" : "var(--navy)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Icon name={isLate ? "alert-triangle" : "clock"} size={16} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        {u.companyName ?? u.companyId}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--gray-500)",
+                          marginTop: 2,
+                        }}
+                      >
+                        {u.ref} · échéance {fmtDate(u.dueDate)}
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>
+                      {fmtEur(u.totalCents)}
+                    </div>
                   </div>
-                </div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{fmtEur(u.amount)}</div>
-              </div>
-            ))}
-          </div>
-          <div
-            style={{
-              marginTop: 14,
-              paddingTop: 14,
-              borderTop: "1px solid rgba(0,0,0,0.06)",
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 12,
-            }}
-          >
-            <span style={{ color: "var(--gray-500)" }}>Encaissements prévus</span>
-            <strong>{fmtEur(UPCOMING.reduce((a, b) => a + b.amount, 0))}</strong>
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Breakdown + Commissions */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 20 }}>
         <div className="glass-panel" style={{ padding: 20 }}>
           <div className="glass-panelhead" style={{ padding: 0, marginBottom: 14 }}>
-            <h3 style={{ margin: 0, fontSize: 14 }}>Répartition des revenus</h3>
-            <div className="glass-segmented">
-              <button
-                type="button"
-                className={breakdown === "product" ? "active" : ""}
-                onClick={() => setBreakdown("product")}
-              >
-                Produit
-              </button>
-              <button
-                type="button"
-                className={breakdown === "city" ? "active" : ""}
-                onClick={() => setBreakdown("city")}
-              >
-                Ville
-              </button>
+            <h3 style={{ margin: 0, fontSize: 14 }}>Dépenses récentes</h3>
+            <span style={{ fontSize: 12, color: "var(--gray-500)" }}>
+              {expenses.length} entrées
+            </span>
+          </div>
+          {expenses.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--gray-500)" }}>
+              Aucune dépense enregistrée.
             </div>
-          </div>
-
-          {/* Stacked bar */}
-          <div
-            style={{
-              display: "flex",
-              height: 14,
-              borderRadius: 999,
-              overflow: "hidden",
-              marginBottom: 16,
-              background: "rgba(0,0,0,0.04)",
-            }}
-          >
-            {segments.map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  width: s.share + "%",
-                  background: s.color,
-                }}
-                title={`${s.label} · ${s.share} %`}
-              />
-            ))}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {segments.map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <span
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 4,
-                    background: s.color,
-                    flexShrink: 0,
-                  }}
-                />
-                <span style={{ flex: 1, fontSize: 13 }}>{s.label}</span>
-                <span style={{ fontSize: 12, color: "var(--gray-500)", fontWeight: 600 }}>
-                  {s.share} %
-                </span>
-                <span style={{ minWidth: 80, textAlign: "right", fontWeight: 700, fontSize: 13 }}>
-                  {fmtEur(s.value)}
-                </span>
-              </div>
-            ))}
-          </div>
+          ) : (
+            <table className="glass-table">
+              <thead>
+                <tr>
+                  <th>Libellé</th>
+                  <th>Catégorie</th>
+                  <th>Date</th>
+                  <th style={{ textAlign: "right" }}>Montant</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenses.slice(0, 5).map((e) => (
+                  <tr key={e.id}>
+                    <td>
+                      <span style={{ fontWeight: 600 }}>{e.label}</span>
+                    </td>
+                    <td style={{ color: "var(--gray-500)" }}>
+                      {EXPENSE_CATEGORY_LABELS[e.category]}
+                    </td>
+                    <td style={{ color: "var(--gray-500)" }}>
+                      {fmtDate(e.expenseDate)}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>
+                      {fmtEur(e.amountCents)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="glass-panel" style={{ padding: 20 }}>
           <div className="glass-panelhead" style={{ padding: 0, marginBottom: 14 }}>
             <div>
               <h3 style={{ margin: 0, fontSize: 14 }}>Commissions chauffeurs</h3>
-              <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--gray-500)" }}>
-                Top 5 · {fmtEur(COMMISSIONS.reduce((a, b) => a + b.amount, 0))} ce mois
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 12,
+                  color: "var(--gray-500)",
+                }}
+              >
+                Top 5 en attente ·{" "}
+                {fmtEur(topCommissions.reduce((a, b) => a + b.amountCents, 0))}
               </p>
             </div>
-            <button type="button" className="glass-btn ghost compact">
-              <Icon name="arrow-right" size={13} /> Détail
-            </button>
           </div>
-          <table className="glass-table">
-            <thead>
-              <tr>
-                <th>Chauffeur</th>
-                <th style={{ textAlign: "right" }}>Courses</th>
-                <th style={{ textAlign: "right" }}>Taux</th>
-                <th style={{ textAlign: "right" }}>Montant</th>
-              </tr>
-            </thead>
-            <tbody>
-              {COMMISSIONS.map((c) => (
-                <tr key={c.name}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div
-                        className="brand-logo"
-                        style={{
-                          background: "var(--navy)",
-                          color: "#fff",
-                          width: 28,
-                          height: 28,
-                          fontSize: 10,
-                        }}
-                      >
-                        {c.initials}
-                      </div>
-                      <span style={{ fontWeight: 600 }}>{c.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ textAlign: "right", color: "var(--gray-600)" }}>{c.rides}</td>
-                  <td style={{ textAlign: "right", color: "var(--gray-500)" }}>8 %</td>
-                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmtEur(c.amount)}</td>
+          {topCommissions.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--gray-500)" }}>
+              Aucune commission en attente.
+            </div>
+          ) : (
+            <table className="glass-table">
+              <thead>
+                <tr>
+                  <th>Chauffeur</th>
+                  <th>Campagne</th>
+                  <th style={{ textAlign: "right" }}>Km</th>
+                  <th style={{ textAlign: "right" }}>Montant</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div
-            style={{
-              marginTop: 10,
-              paddingTop: 12,
-              borderTop: "1px solid rgba(0,0,0,0.06)",
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 12,
-            }}
-          >
-            <span style={{ color: "var(--gray-500)" }}>Prochain versement</span>
-            <strong>30 avr.</strong>
-          </div>
+              </thead>
+              <tbody>
+                {topCommissions.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 10 }}
+                      >
+                        <div
+                          className="brand-logo"
+                          style={{
+                            background: "var(--navy)",
+                            color: "#fff",
+                            width: 28,
+                            height: 28,
+                            fontSize: 10,
+                          }}
+                        >
+                          {initialsFor(c.driverName)}
+                        </div>
+                        <span style={{ fontWeight: 600 }}>{c.driverName}</span>
+                      </div>
+                    </td>
+                    <td style={{ color: "var(--gray-500)", fontSize: 12 }}>
+                      {c.campaignBrand ?? c.campaignTitle ?? "—"}
+                    </td>
+                    <td style={{ textAlign: "right", color: "var(--gray-600)" }}>
+                      {c.km.toLocaleString("fr-FR")}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>
+                      {fmtEur(c.amountCents)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
-      {/* Summary strip */}
       <div
         className="glass-panel"
         style={{
@@ -647,42 +714,37 @@ export function FinancesGlass() {
         }}
       >
         <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: 11, color: "var(--gray-500)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Total facturé
+          {[
+            { l: "Total facturé", v: fmtEur(totals.all), c: undefined },
+            { l: "Payé", v: fmtEur(totals.paid), c: "var(--success)" },
+            { l: "En cours", v: fmtEur(totals.pending), c: "var(--info)" },
+            { l: "En retard", v: fmtEur(totals.late), c: "var(--danger)" },
+          ].map((s) => (
+            <div key={s.l}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--gray-500)",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                {s.l}
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: s.c,
+                }}
+              >
+                {s.v}
+              </div>
             </div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700 }}>
-              {fmtEur(totals.all)}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: "var(--gray-500)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Payé
-            </div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, color: "var(--success)" }}>
-              {fmtEur(totals.paid)}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: "var(--gray-500)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              En cours
-            </div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, color: "var(--info)" }}>
-              {fmtEur(totals.pending)}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: "var(--gray-500)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              En retard
-            </div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, color: "var(--danger)" }}>
-              {fmtEur(totals.late)}
-            </div>
-          </div>
+          ))}
         </div>
-        <button type="button" className="glass-btn">
-          <Icon name="plus" size={14} /> Nouvelle facture
-        </button>
       </div>
     </div>
   );
