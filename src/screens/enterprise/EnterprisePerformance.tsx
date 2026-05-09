@@ -2,69 +2,140 @@
 
 /**
  * EnterprisePerformance — advertiser analytics dashboard.
- * Period toggle, impressions trend, city split, campaign split, export actions.
+ * Period toggle, real impressions trend, city split, campaign split.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { StackedArea, HorizontalBars } from "@/components/charts";
-import { CAMPAIGNS } from "@/lib/data";
+import { HorizontalBars } from "@/components/charts";
+import type {
+  PerformanceDTO,
+  PerformancePeriod,
+} from "@/lib/campaign-performance-service";
 
-type Period = "7j" | "30j" | "90j" | "annee";
-
-const PERIOD_LABEL: Record<Period, string> = {
-  "7j": "7 j",
-  "30j": "30 j",
-  "90j": "90 j",
-  annee: "Année",
+const PERIOD_LABEL: Record<PerformancePeriod, string> = {
+  "7d": "7 j",
+  "30d": "30 j",
+  "90d": "90 j",
+  "365d": "Année",
 };
 
-const BASE_KPIS = {
-  impressions: 486320,
-  reach: 124800,
-  km: 31240,
-  hours: 2136,
-};
-
-const PERIOD_FACTOR: Record<Period, number> = {
-  "7j": 0.23,
-  "30j": 1,
-  "90j": 2.8,
-  annee: 11.6,
-};
-
-const CITY_SPLIT = [
-  { city: "Paris", count: 182400 },
-  { city: "Lyon", count: 96320 },
-  { city: "Marseille", count: 68200 },
-  { city: "Bordeaux", count: 54120 },
-  { city: "Toulouse", count: 41200 },
-  { city: "Nantes", count: 28300 },
-];
-
-const CAMPAIGN_SHARE = [
-  { id: "c1", name: "Nova Printemps", pct: 38, color: "#EC407A" },
-  { id: "c2", name: "Nova Été — teaser", pct: 27, color: "#A855F7" },
-  { id: "c3", name: "Nova Bornes Paris", pct: 22, color: "#3B82F6" },
-  { id: "c4", name: "Nova Flocage Lyon", pct: 13, color: "#14B8A6" },
+const CAMPAIGN_PALETTE = [
+  "#EC407A",
+  "#A855F7",
+  "#3B82F6",
+  "#14B8A6",
+  "#F59E0B",
+  "#43A047",
+  "#9CA3AF",
 ];
 
 function fmt(n: number) {
   return n.toLocaleString("fr-FR");
 }
 
-export function EnterprisePerformance() {
-  const [period, setPeriod] = useState<Period>("30j");
+// Single-series area chart over the impressions timeline.
+function ImpressionsArea({
+  data,
+  height = 260,
+  width = 720,
+}: {
+  data: number[];
+  height?: number;
+  width?: number;
+}) {
+  const n = data.length;
+  if (n < 2) {
+    return (
+      <div
+        style={{
+          height,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--gray-500)",
+          fontSize: 13,
+        }}
+      >
+        Pas assez de données pour tracer la courbe.
+      </div>
+    );
+  }
+  const pad = { l: 40, r: 16, t: 16, b: 28 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+  const maxY = Math.max(1, ...data) * 1.1;
+  const dx = w / (n - 1);
+  const y = (v: number) => pad.t + h - (v / maxY) * h;
+  const path = data
+    .map((v, i) => (i === 0 ? "M" : "L") + (pad.l + i * dx) + "," + y(v))
+    .join(" ");
+  const area = path + ` L${pad.l + w},${pad.t + h} L${pad.l},${pad.t + h} Z`;
+  const gridTicks = 4;
+  return (
+    <svg
+      width="100%"
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ maxWidth: "100%" }}
+    >
+      {Array.from({ length: gridTicks + 1 }).map((_, i) => {
+        const yy = pad.t + (h / gridTicks) * i;
+        const val = Math.round(maxY - (maxY / gridTicks) * i);
+        return (
+          <g key={i}>
+            <line
+              x1={pad.l}
+              x2={pad.l + w}
+              y1={yy}
+              y2={yy}
+              stroke="#E5E5E5"
+              strokeWidth="1"
+              opacity="0.7"
+            />
+            <text x={pad.l - 8} y={yy + 3} fill="#737373" fontSize="10" textAnchor="end">
+              {fmt(val)}
+            </text>
+          </g>
+        );
+      })}
+      <path d={area} fill="#3B82F6" opacity="0.2" />
+      <path d={path} fill="none" stroke="#3B82F6" strokeWidth="1.8" />
+    </svg>
+  );
+}
 
-  const kpis = useMemo(() => {
-    const f = PERIOD_FACTOR[period];
-    return {
-      impressions: Math.round(BASE_KPIS.impressions * f),
-      reach: Math.round(BASE_KPIS.reach * f),
-      km: Math.round(BASE_KPIS.km * f),
-      hours: Math.round(BASE_KPIS.hours * f),
+export function EnterprisePerformance() {
+  const [period, setPeriod] = useState<PerformancePeriod>("30d");
+  const [data, setData] = useState<PerformanceDTO | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await fetch(`/api/me/performance?period=${period}`, {
+          credentials: "include",
+        });
+        const json = (await r.json()) as PerformanceDTO;
+        if (!cancelled) setData(json);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, [period]);
+
+  const cityRows = useMemo(
+    () =>
+      (data?.cities ?? []).map((c) => ({ city: c.city, count: c.impressions })),
+    [data],
+  );
+
+  const campaigns = data?.campaigns ?? [];
 
   return (
     <div className="glass-page">
@@ -79,7 +150,7 @@ export function EnterprisePerformance() {
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <div className="ent-seg">
-            {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
+            {(Object.keys(PERIOD_LABEL) as PerformancePeriod[]).map((p) => (
               <button
                 key={p}
                 className={period === p ? "active" : ""}
@@ -89,21 +160,31 @@ export function EnterprisePerformance() {
               </button>
             ))}
           </div>
-          <button type="button" className="glass-btn ghost">
-            <Icon name="download" size={14} /> CSV
-          </button>
-          <button type="button" className="glass-btn">
-            <Icon name="file-text" size={14} /> PDF
-          </button>
         </div>
       </div>
 
       <div className="glass-kpigrid">
         {[
-          { l: "Impressions", v: fmt(kpis.impressions), s: "+18 % vs période précédente" },
-          { l: "Reach estimé", v: fmt(kpis.reach), s: "audience unique" },
-          { l: "Kilomètres", v: `${fmt(kpis.km)} km`, s: "parcourus par les chauffeurs" },
-          { l: "Heures de diffusion", v: `${fmt(kpis.hours)} h`, s: "toutes campagnes confondues" },
+          {
+            l: "Impressions",
+            v: data ? fmt(data.kpis.impressionsTotal) : "—",
+            s: data ? `sur ${data.impressionsTimeline.length} jours` : "—",
+          },
+          {
+            l: "Bornes touchées",
+            v: data ? fmt(data.kpis.reachTerminals) : "—",
+            s: "terminaux uniques",
+          },
+          {
+            l: "Kilomètres",
+            v: data ? `${fmt(data.kpis.kmTotal)} km` : "—",
+            s: "cumulés (toutes campagnes)",
+          },
+          {
+            l: "Jours-campagne",
+            v: data ? fmt(data.kpis.campaignDays) : "—",
+            s: "drivers × jours actifs",
+          },
         ].map((k) => (
           <div key={k.l} className="glass-kpi">
             <div
@@ -137,23 +218,11 @@ export function EnterprisePerformance() {
           <div className="glass-panelhead">
             <h3 style={{ margin: 0, fontSize: 14 }}>Impressions par jour</h3>
             <div style={{ fontSize: 11, color: "var(--gray-500)" }}>
-              Flocage vs Borne
+              {data ? fmt(data.kpis.impressionsTotal) : "—"} au total
             </div>
           </div>
           <div style={{ padding: 16 }}>
-            <StackedArea height={260} />
-            <div
-              style={{
-                display: "flex",
-                gap: 16,
-                marginTop: 10,
-                fontSize: 11.5,
-                color: "var(--gray-500)",
-              }}
-            >
-              <Legend color="#233466" label="Flocage véhicule" />
-              <Legend color="#3B82F6" label="Leader Borne" />
-            </div>
+            <ImpressionsArea data={data?.impressionsTimeline ?? []} />
           </div>
         </div>
 
@@ -162,8 +231,13 @@ export function EnterprisePerformance() {
             <h3 style={{ margin: 0, fontSize: 14 }}>Répartition par campagne</h3>
           </div>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            {CAMPAIGN_SHARE.map((c) => (
-              <div key={c.id} style={{ display: "grid", gap: 4 }}>
+            {!loading && campaigns.length === 0 && (
+              <div style={{ color: "var(--gray-500)", fontSize: 13 }}>
+                Aucune impression sur la période.
+              </div>
+            )}
+            {campaigns.map((c, idx) => (
+              <div key={c.campaignId} style={{ display: "grid", gap: 4 }}>
                 <div
                   style={{
                     display: "flex",
@@ -172,7 +246,9 @@ export function EnterprisePerformance() {
                     fontWeight: 600,
                   }}
                 >
-                  <span>{c.name}</span>
+                  <span>
+                    {c.brand} {c.brand !== c.title && `· ${c.title}`}
+                  </span>
                   <span style={{ color: "var(--gray-500)" }}>{c.pct} %</span>
                 </div>
                 <div
@@ -187,7 +263,7 @@ export function EnterprisePerformance() {
                     style={{
                       width: c.pct + "%",
                       height: "100%",
-                      background: c.color,
+                      background: CAMPAIGN_PALETTE[idx % CAMPAIGN_PALETTE.length],
                       borderRadius: 999,
                     }}
                   />
@@ -201,87 +277,20 @@ export function EnterprisePerformance() {
       <div className="glass-panel" style={{ marginTop: 24 }}>
         <div className="glass-panelhead">
           <h3 style={{ margin: 0, fontSize: 14 }}>Couverture par ville</h3>
-          <button type="button" className="glass-btn ghost" style={{ padding: "4px 10px", fontSize: 11 }}>
-            Détails <Icon name="chevron-right" size={12} />
-          </button>
+          <span style={{ fontSize: 11, color: "var(--gray-500)" }}>
+            {cityRows.length} ville(s)
+          </span>
         </div>
         <div style={{ padding: 16 }}>
-          <HorizontalBars data={CITY_SPLIT} />
-        </div>
-      </div>
-
-      <div className="glass-panel" style={{ marginTop: 24 }}>
-        <div className="glass-panelhead">
-          <h3 style={{ margin: 0, fontSize: 14 }}>Rapports téléchargeables</h3>
-        </div>
-        <div style={{ padding: 16, display: "grid", gap: 10 }}>
-          {[
-            { name: "Rapport mensuel — mars 2026", size: "PDF · 2,1 Mo", when: "01 avr." },
-            { name: "Rapport mensuel — février 2026", size: "PDF · 1,9 Mo", when: "01 mar." },
-            { name: "Export impressions — Q1 2026", size: "CSV · 420 Ko", when: "02 avr." },
-            { name: "Rapport Nova Printemps — final", size: "PDF · 3,4 Mo", when: "15 mar." },
-          ].map((r) => (
-            <div
-              key={r.name}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "11px 14px",
-                background: "rgba(255,255,255,0.6)",
-                border: "1px solid rgba(35,52,102,0.08)",
-                borderRadius: 12,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    background: "linear-gradient(135deg, #233466, #3A4B8A)",
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Icon name="file-text" size={16} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--gray-500)" }}>
-                    {r.size} · {r.when}
-                  </div>
-                </div>
-              </div>
-              <button type="button" className="glass-btn ghost">
-                <Icon name="download" size={14} /> Télécharger
-              </button>
+          {!loading && cityRows.length === 0 ? (
+            <div style={{ color: "var(--gray-500)", fontSize: 13 }}>
+              Aucune impression sur la période — la couverture s&apos;affiche dès qu&apos;une borne diffuse.
             </div>
-          ))}
+          ) : (
+            <HorizontalBars data={cityRows} />
+          )}
         </div>
       </div>
     </div>
   );
 }
-
-function Legend({ color, label }: { color: string; label: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span
-        style={{
-          width: 10,
-          height: 10,
-          borderRadius: 3,
-          background: color,
-          display: "inline-block",
-        }}
-      />
-      <span>{label}</span>
-    </div>
-  );
-}
-
-// Silence unused-import warning for CAMPAIGNS (kept for future deep-link).
-void CAMPAIGNS;

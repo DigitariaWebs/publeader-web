@@ -60,6 +60,19 @@ type AssignedDriver = {
   phone: string;
 };
 
+type CampaignPerformanceDTO = {
+  kpis: {
+    impressionsTotal: number;
+    reachTerminals: number;
+    kmTotal: number;
+    campaignDays: number;
+  };
+  impressionsTimeline: number[];
+  fillRatePct: number;
+  budgetCents: number;
+  budgetConsumedPct: number;
+};
+
 type EligibleDriver = Omit<AssignedDriver, "phone">;
 
 type AssetLite = {
@@ -152,6 +165,7 @@ export function EnterpriseCampagneDetail({ id }: Props) {
   const [busy, setBusy] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [terminalInput, setTerminalInput] = useState("");
+  const [perf, setPerf] = useState<CampaignPerformanceDTO | null>(null);
 
   const reloadCampaign = useCallback(async () => {
     setError(null);
@@ -208,6 +222,20 @@ export function EnterpriseCampagneDetail({ id }: Props) {
     }
   }, []);
 
+  const reloadPerformance = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/me/campaigns/${id}/performance?period=30d`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) return;
+      const body = (await res.json()) as CampaignPerformanceDTO;
+      setPerf(body);
+    } catch {
+      /* ignore — overview still works without perf */
+    }
+  }, [id]);
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -222,13 +250,14 @@ export function EnterpriseCampagneDetail({ id }: Props) {
           ? reloadEligible()
           : Promise.resolve(),
         (c.assetIds?.length ?? 0) > 0 ? reloadAssets() : Promise.resolve(),
+        c.status !== "draft" ? reloadPerformance() : Promise.resolve(),
       ]);
       setLoading(false);
     })();
     return () => {
       live = false;
     };
-  }, [reloadCampaign, reloadDrivers, reloadEligible, reloadAssets]);
+  }, [reloadCampaign, reloadDrivers, reloadEligible, reloadAssets, reloadPerformance]);
 
   const linkedAssets = useMemo(() => {
     if (!campaign?.assetIds) return [];
@@ -560,6 +589,46 @@ export function EnterpriseCampagneDetail({ id }: Props) {
                 )}
               </div>
             </div>
+
+            {perf && (
+              <div className="glass-panel">
+                <div className="glass-panelhead">
+                  <h3 style={{ margin: 0, fontSize: 14 }}>Performance — 30 j</h3>
+                </div>
+                <div style={{ padding: 16, display: "grid", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                    }}
+                  >
+                    <PerfTile
+                      label="Impressions"
+                      value={perf.kpis.impressionsTotal.toLocaleString("fr-FR")}
+                    />
+                    <PerfTile
+                      label="Bornes touchées"
+                      value={perf.kpis.reachTerminals.toLocaleString("fr-FR")}
+                    />
+                    <PerfTile
+                      label="Kilomètres"
+                      value={`${perf.kpis.kmTotal.toLocaleString("fr-FR")} km`}
+                    />
+                    <PerfTile
+                      label="Jours-campagne"
+                      value={perf.kpis.campaignDays.toLocaleString("fr-FR")}
+                    />
+                  </div>
+                  <PerfSparkline data={perf.impressionsTimeline} />
+                  <Stat
+                    label="Taux de remplissage"
+                    pct={perf.fillRatePct}
+                    caption={`${perf.fillRatePct} %`}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -937,5 +1006,66 @@ function Stat({
         {caption}
       </div>
     </div>
+  );
+}
+
+function PerfTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        background: "rgba(35,52,102,0.04)",
+        borderRadius: 10,
+        padding: "10px 12px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          color: "var(--gray-500)",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 18,
+          fontWeight: 700,
+          marginTop: 2,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function PerfSparkline({ data }: { data: number[] }) {
+  if (data.length < 2) {
+    return (
+      <div style={{ fontSize: 11, color: "var(--gray-500)" }}>
+        Pas assez de points pour la courbe.
+      </div>
+    );
+  }
+  const w = 320;
+  const h = 60;
+  const maxY = Math.max(1, ...data);
+  const dx = w / (data.length - 1);
+  const path = data
+    .map((v, i) => (i === 0 ? "M" : "L") + i * dx + "," + (h - (v / maxY) * (h - 4) - 2))
+    .join(" ");
+  return (
+    <svg
+      width="100%"
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ maxWidth: "100%" }}
+    >
+      <path d={path} fill="none" stroke="#3B82F6" strokeWidth="1.5" />
+    </svg>
   );
 }
