@@ -5,6 +5,7 @@
  * Layout 1:1 with the prototype's <Login>; visual polish adds motion + glass.
  */
 
+import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
@@ -64,10 +65,12 @@ export function Login() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 40 }}>
-            <img
+            <Image
               src="/assets/logo-white.png"
               alt="Publeader"
-              style={{ height: 28, width: "auto", display: "block" }}
+              width={120}
+              height={28}
+              style={{ height: 28, width: "auto" }}
             />
           </div>
           <h1

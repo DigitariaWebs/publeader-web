@@ -123,7 +123,7 @@ export function DocumentsQueuePro() {
         <div>
           <h1>Documents</h1>
           <p className="subtitle">
-            File d'attente de validation des documents chauffeurs.
+            File d&apos;attente de validation des documents chauffeurs.
           </p>
         </div>
         <button

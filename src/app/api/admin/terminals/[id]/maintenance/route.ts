@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
 import { db } from "@/lib/db";
 import { Collections, type MaintenanceWindowDoc } from "@/lib/schemas";
 import { requireAdmin } from "@/lib/session";

@@ -8,6 +8,7 @@ if (!uri) {
 }
 
 declare global {
+  // eslint-disable-next-line no-var
   var __mongoClient: MongoClient | undefined;
 }
 

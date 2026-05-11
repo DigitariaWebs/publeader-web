@@ -6,7 +6,6 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Icon } from "@/components/Icon";
 import { HorizontalBars } from "@/components/charts";
 import type {
   PerformanceDTO,

@@ -4,7 +4,7 @@
  * CommandPalette — ⌘K palette. Live admin search backed by /api/admin/search.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon, type IconName } from "@/components/Icon";
 import { useUiState } from "@/contexts/UiStateContext";
@@ -118,12 +118,15 @@ export function CommandPalette() {
     };
   }, [q, cmdkOpen]);
 
-  const filterLocal = (l: Entry[]) =>
-    q.trim() === ""
-      ? l
-      : l.filter((i) =>
-          (i.label + " " + (i.desc || "")).toLowerCase().includes(q.toLowerCase()),
-        );
+  const filterLocal = useCallback(
+    (l: Entry[]) =>
+      q.trim() === ""
+        ? l
+        : l.filter((i) =>
+            (i.label + " " + (i.desc || "")).toLowerCase().includes(q.toLowerCase()),
+          ),
+    [q],
+  );
 
   const groups = useMemo(() => {
     const out: { title: string; items: Entry[] }[] = [];
@@ -138,7 +141,7 @@ export function CommandPalette() {
       });
     }
     return out;
-  }, [q, results]);
+  }, [results, filterLocal]);
 
   const flat = groups.flatMap((g) => g.items);
 

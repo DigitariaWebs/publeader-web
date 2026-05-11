@@ -113,7 +113,7 @@ export function WithdrawalsQueuePro() {
         <div>
           <h1>Retraits</h1>
           <p className="subtitle">
-            File d'attente des demandes de retrait des chauffeurs.
+            File d&apos;attente des demandes de retrait des chauffeurs.
           </p>
         </div>
         <button

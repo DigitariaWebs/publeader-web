@@ -5,6 +5,7 @@
  * Mirrors EnterpriseShell's glass topbar; tabs reflect P1–P6 todo lanes.
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -93,10 +94,12 @@ export function PartnerShell({ children }: PartnerShellProps) {
             className="glass-logo-img"
             style={{ display: "flex", alignItems: "center", gap: 10 }}
           >
-            <img
+            <Image
               src="/assets/logo-navy.png"
               alt="Publeader"
-              style={{ height: 28, width: "auto", display: "block" }}
+              width={120}
+              height={28}
+              style={{ height: 28, width: "auto" }}
             />
             <span className="ent-badge">Partenaire</span>
           </Link>

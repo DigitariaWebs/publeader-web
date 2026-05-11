@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/session";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { Collections } from "@/lib/schemas";
 import { serializeAdminUser, type AdminUserDTO } from "@/lib/user-serializer";
 
 export const dynamic = "force-dynamic";

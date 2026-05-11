@@ -141,11 +141,6 @@ async function fetchInvitationsRaw(
   return Array.isArray(res) ? res : [];
 }
 
-async function countAdmins(headers: Headers, organizationId: string): Promise<number> {
-  const members = await fetchMembersRaw(headers, organizationId);
-  return members.filter((m) => memberIsAdmin(m.role)).length;
-}
-
 export async function getTeamSnapshot(params: {
   headers: Headers;
   companyId: string;

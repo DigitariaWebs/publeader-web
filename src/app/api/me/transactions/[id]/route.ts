@@ -36,7 +36,7 @@ export async function GET(
 
   // Build a small timeline for UI based on type.
   const timeline: { label: string; date: string }[] = [];
-  let context: {
+  const context: {
     campaign?: { id: string; title: string; brand: string; endDate: string };
     withdrawal?: {
       id: string;

@@ -5,6 +5,7 @@
  * 1:1 port of glass-screens.jsx's <GlassShell>.
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -74,10 +75,12 @@ export function GlassShell({ children }: GlassShellProps) {
       <div style={{ maxWidth: 1440, margin: "0 auto" }}>
         <div className="glass-topbar">
           <Link href="/" className="glass-logo-img">
-            <img
+            <Image
               src="/assets/logo-navy.png"
               alt="Publeader"
-              style={{ height: 28, width: "auto", display: "block" }}
+              width={120}
+              height={28}
+              style={{ height: 28, width: "auto" }}
             />
           </Link>
           <div className="glass-pillnav">

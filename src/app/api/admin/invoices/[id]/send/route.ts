@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { requireAdmin } from "@/lib/session";
 import { db } from "@/lib/db";
-import { Collections, type CompanyDoc } from "@/lib/schemas";
+import { type CompanyDoc } from "@/lib/schemas";
 import {
   InvoiceError,
   getInvoiceWithCompany,
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx) {
   }
 
   try {
-    const { invoice: current, company } = await getInvoiceWithCompany(id);
+    const { company } = await getInvoiceWithCompany(id);
     const recipient = body.email || (await resolveContactEmail(company));
     if (!recipient) {
       throw new InvoiceError(

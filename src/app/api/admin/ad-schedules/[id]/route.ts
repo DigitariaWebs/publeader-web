@@ -3,7 +3,6 @@ import { ObjectId } from "mongodb";
 import { db } from "@/lib/db";
 import {
   Collections,
-  type AdScheduleDoc,
   type CampaignDoc,
   type TerminalDoc,
 } from "@/lib/schemas";

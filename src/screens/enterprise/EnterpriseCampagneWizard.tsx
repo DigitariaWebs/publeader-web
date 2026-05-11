@@ -143,10 +143,6 @@ function todayPlus(daysOffset: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function formatEur(cents: number): string {
-  return `${(cents / 100).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} €`;
-}
-
 export function EnterpriseCampagneWizard({ initialId }: Props) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3>(1);

@@ -1,7 +1,6 @@
 import type {
   AdImpressionDailyDoc,
   AdIssueReportDoc,
-  AdScheduleDoc,
   AdScheduleStatus,
 } from "./schemas";
 import type { ResolvedSchedule } from "./ad-schedule-service";

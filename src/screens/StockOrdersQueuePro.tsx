@@ -6,7 +6,6 @@ import type {
   ScentDTO,
   StockOrderDTO,
   CartridgeDTO,
-  RefillLogDTO,
 } from "@/lib/stock-serializer";
 import type { TerminalDTO } from "@/lib/terminal-serializer";
 

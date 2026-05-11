@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcrypt";
 import { db } from "@/lib/db";
 import {
-  CARTRIDGE_SLOT_COUNT,
   Collections,
   type CartridgeSlot,
   type ScreenStatus,
