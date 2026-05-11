@@ -1,6 +1,4 @@
 import { AppShell } from "@/components/AppShell";
-import { ScreenSwitcher } from "@/components/ScreenSwitcher";
-import { CampagneDetailPro } from "@/screens/CampagneDetailPro";
 import { CampagneDetailGlass } from "@/screens/CampagneDetailGlass";
 
 interface Props {
@@ -11,10 +9,7 @@ export default async function CampagneDetailPage({ params }: Props) {
   const { id } = await params;
   return (
     <AppShell>
-      <ScreenSwitcher
-        glass={<CampagneDetailGlass id={id} />}
-        pro={<CampagneDetailPro id={id} />}
-      />
+      <CampagneDetailGlass id={id} />
     </AppShell>
   );
 }

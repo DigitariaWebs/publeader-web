@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { ScreenSwitcher } from "@/components/ScreenSwitcher";
-import { BornesPro } from "@/screens/BornesPro";
 import { BornesGlass } from "@/screens/BornesGlass";
 import { toBorne } from "@/lib/terminal-adapter";
 import type { Borne } from "@/lib/data";
@@ -43,10 +41,7 @@ export default function BornesPage() {
       ) : error ? (
         <div style={{ padding: 32, color: "var(--danger)" }}>Erreur: {error}</div>
       ) : (
-        <ScreenSwitcher
-          glass={<BornesGlass bornes={bornes} />}
-          pro={<BornesPro bornes={bornes} />}
-        />
+        <BornesGlass bornes={bornes} />
       )}
     </AppShell>
   );

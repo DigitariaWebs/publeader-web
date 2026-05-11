@@ -13,7 +13,6 @@ interface ScreenSwitcherProps {
   pro: ReactNode;
 }
 
-export function ScreenSwitcher({ glass, pro }: ScreenSwitcherProps) {
-  const { uiStyle } = useTheme();
-  return <>{uiStyle === "glass" ? glass : pro}</>;
+export function ScreenSwitcher({ glass }: ScreenSwitcherProps) {
+  return <>{glass}</>;
 }

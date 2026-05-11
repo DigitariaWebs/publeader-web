@@ -7,6 +7,7 @@ import type { ExpenseDTO, InvoiceDTO } from "@/lib/finance-serializer";
 import type { CommissionRow } from "@/lib/commission-service";
 import type { FinanceKpiDTO } from "@/lib/finance-kpi-service";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/schemas";
+import { useToast } from "@/contexts/ToastContext";
 
 type StatusFilter = "all" | "paid" | "pending" | "late";
 
@@ -64,6 +65,8 @@ export function FinancesGlass() {
   const [commissions, setCommissions] = useState<CommissionRow[]>([]);
   const [expenses, setExpenses] = useState<ExpenseDTO[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -91,6 +94,24 @@ export function FinancesGlass() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  const mutate = async (label: string, fn: () => Promise<Response>) => {
+    setBusyId(label);
+    try {
+      const res = await fn();
+      if (!res.ok) {
+        const b = await res.json();
+        pushToast({ kind: "danger", title: "Erreur", desc: b.error ?? "Échec" });
+      } else {
+        pushToast({ kind: "success", title: label });
+        await reload();
+      }
+    } catch {
+      pushToast({ kind: "danger", title: "Erreur réseau" });
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const filteredInvoices = useMemo(
     () => invoices.filter((i) => matchesStatus(i.status, statusFilter)),
@@ -417,6 +438,7 @@ export function FinancesGlass() {
                   <th>Statut</th>
                   <th style={{ textAlign: "right" }}>Montant</th>
                   <th style={{ textAlign: "right" }}>PDF</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -486,6 +508,66 @@ export function FinancesGlass() {
                         >
                           <Icon name="download" size={13} />
                         </a>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <div style={{ display: "inline-flex", gap: 4 }}>
+                          {inv.status !== "payee" && inv.status !== "en_retard" && (
+                            <button
+                              type="button"
+                              className="glass-btn ghost compact"
+                              disabled={busyId !== null}
+                              onClick={() =>
+                                mutate("Envoyer", () =>
+                                  fetch(`/api/admin/invoices/${inv.id}/send`, {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({}),
+                                  }),
+                                )
+                              }
+                            >
+                              Envoyer
+                            </button>
+                          )}
+                          {(inv.status === "envoyee" || inv.status === "en_retard") && (
+                            <button
+                              type="button"
+                              className="glass-btn ghost compact"
+                              disabled={busyId !== null}
+                              onClick={() => {
+                                const ref = window.prompt("Référence de paiement :") ?? undefined;
+                                mutate("Marquer payée", () =>
+                                  fetch(`/api/admin/invoices/${inv.id}/mark-paid`, {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ paidReference: ref || undefined }),
+                                  }),
+                                );
+                              }}
+                            >
+                              Marquer payée
+                            </button>
+                          )}
+                          {(inv.status === "brouillon") && (
+                            <button
+                              type="button"
+                              className="glass-btn ghost compact"
+                              disabled={busyId !== null}
+                              onClick={() =>
+                                mutate("Supprimer", () =>
+                                  fetch(`/api/admin/invoices/${inv.id}`, {
+                                    method: "DELETE",
+                                    credentials: "include",
+                                  }),
+                                )
+                              }
+                            >
+                              Supprimer
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -608,6 +690,7 @@ export function FinancesGlass() {
                   <th>Catégorie</th>
                   <th>Date</th>
                   <th style={{ textAlign: "right" }}>Montant</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -624,6 +707,23 @@ export function FinancesGlass() {
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>
                       {fmtEur(e.amountCents)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        type="button"
+                        className="glass-btn ghost compact"
+                        disabled={busyId !== null}
+                        onClick={() =>
+                          mutate("Supprimer", () =>
+                            fetch(`/api/admin/expenses/${e.id}`, {
+                              method: "DELETE",
+                              credentials: "include",
+                            }),
+                          )
+                        }
+                      >
+                        Supprimer
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -660,6 +760,7 @@ export function FinancesGlass() {
                   <th>Campagne</th>
                   <th style={{ textAlign: "right" }}>Km</th>
                   <th style={{ textAlign: "right" }}>Montant</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -692,6 +793,27 @@ export function FinancesGlass() {
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>
                       {fmtEur(c.amountCents)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {c.status === "pending" && (
+                        <button
+                          type="button"
+                          className="glass-btn ghost compact"
+                          disabled={busyId !== null}
+                          onClick={() =>
+                            mutate("Régler", () =>
+                              fetch("/api/admin/commissions/settle", {
+                                method: "POST",
+                                credentials: "include",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ transactionIds: [c.id] }),
+                              }),
+                            )
+                          }
+                        >
+                          Régler
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

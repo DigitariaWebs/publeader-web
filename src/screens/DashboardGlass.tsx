@@ -6,6 +6,13 @@ import { Icon } from "@/components/Icon";
 import { Sparkline } from "@/components/charts";
 import type { AdminDashboardDTO } from "@/lib/dashboard-serializer";
 
+type RevenueChartDTO = {
+  range: string;
+  points: { date: string; flocageCents: number; borneCents: number }[];
+  totals: { flocageCents: number; borneCents: number };
+  paidCutoff: string;
+};
+
 const VALIDATION_KIND_LABEL: Record<"driver" | "company" | "partner", string> = {
   driver: "Chauffeur",
   company: "Entreprise",
@@ -42,6 +49,8 @@ function fmtDelta(delta: number | null): string | null {
 export function DashboardGlass() {
   const [data, setData] = useState<AdminDashboardDTO | null>(null);
   const [loading, setLoading] = useState(true);
+  const [chartRange, setChartRange] = useState<"30" | "90" | "365">("30");
+  const [chart, setChart] = useState<RevenueChartDTO | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,18 +68,37 @@ export function DashboardGlass() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/admin/dashboard/revenue?range=${chartRange}`, {
+          credentials: "include",
+        });
+        const json = (await r.json()) as RevenueChartDTO;
+        if (!cancelled) setChart(json);
+      } catch {
+        // non-fatal — sparkline falls back to synthetic data
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chartRange]);
+
   const today = new Date().toLocaleDateString("fr-FR", {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
 
-  // Synthetic sparkline driven off finance KPI as a fallback. Real point-by
-  // -point monthly trend lives behind the revenue endpoint and is drawn on
-  // the Pro variant; the glass hero just needs a hint at shape.
-  const sparkData = data
-    ? Array.from({ length: 15 }, (_, i) => 1 + i * 0.5)
-    : [];
+  // Use real revenue points when available; fall back to a synthetic shape.
+  const sparkData =
+    chart && chart.points.length > 0
+      ? chart.points.map((p) => p.flocageCents + p.borneCents)
+      : data
+      ? Array.from({ length: 15 }, (_, i) => 1 + i * 0.5)
+      : [];
 
   const mrr = data?.finance?.collectedCents ?? 0;
   const mrrDelta = data ? fmtDelta(data.mrrDelta) : null;
@@ -89,9 +117,22 @@ export function DashboardGlass() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button type="button" className="glass-btn ghost">
-            <Icon name="calendar" size={14} /> 30 jours
-          </button>
+          {(
+            [
+              { label: "30 j", value: "30" },
+              { label: "90 j", value: "90" },
+              { label: "12 m", value: "365" },
+            ] as { label: string; value: "30" | "90" | "365" }[]
+          ).map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={`glass-btn ghost${chartRange === opt.value ? " active" : ""}`}
+              onClick={() => setChartRange(opt.value)}
+            >
+              {opt.value === "30" && <Icon name="calendar" size={14} />} {opt.label}
+            </button>
+          ))}
           <Link href="/campagnes/new" className="glass-btn">
             <Icon name="plus" size={14} /> Nouvelle campagne
           </Link>
